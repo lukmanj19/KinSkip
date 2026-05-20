@@ -1,22 +1,31 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: SafePlayer API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication and user management
+  - name: media
+    description: Media library and playback
+  - name: jumpframes
+    description: Jump frame management
+  - name: submissions
+    description: Community submissions queue
+  - name: admin
+    description: Admin dashboard operations
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +33,408 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # AUTH
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Unauthorized
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: OK
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+
+  /auth/verify-pin:
+    post:
+      operationId: verifyPin
+      tags: [auth]
+      summary: Verify admin PIN to unlock unfiltered mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinVerifyResponse"
+        "401":
+          description: Wrong PIN
+
+  /auth/set-pin:
+    post:
+      operationId: setPin
+      tags: [auth]
+      summary: Set or update admin PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPinInput"
+      responses:
+        "200":
+          description: OK
+
+  # MEDIA
+  /media:
+    get:
+      operationId: listMedia
+      tags: [media]
+      summary: List recently viewed media for current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MediaEntry"
+
+    post:
+      operationId: createMedia
+      tags: [media]
+      summary: Add media to library (file or URL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MediaInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaEntry"
+
+  /media/{id}:
+    get:
+      operationId: getMedia
+      tags: [media]
+      summary: Get media entry with jump frames and safety status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaDetail"
+        "404":
+          description: Not found
+
+    delete:
+      operationId: deleteMedia
+      tags: [media]
+      summary: Remove media from library
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /media/lookup:
+    post:
+      operationId: lookupMedia
+      tags: [media]
+      summary: Lookup safety status by title or file hash
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MediaLookupInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaLookupResult"
+
+  # JUMP FRAMES
+  /jumpframes:
+    get:
+      operationId: listJumpFrames
+      tags: [jumpframes]
+      summary: List jump frames for a given mediaId
+      parameters:
+        - name: mediaId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [personal, global, all]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JumpFrame"
+
+    post:
+      operationId: createJumpFrame
+      tags: [jumpframes]
+      summary: Submit a new jump frame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JumpFrameInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JumpFrame"
+
+  /jumpframes/{id}:
+    delete:
+      operationId: deleteJumpFrame
+      tags: [jumpframes]
+      summary: Delete a personal jump frame
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /jumpframes/{id}/validate:
+    post:
+      operationId: validateJumpFrame
+      tags: [jumpframes]
+      summary: Admin validates a submitted jump frame into global database
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JumpFrame"
+
+  # SUBMISSIONS
+  /submissions:
+    get:
+      operationId: listSubmissions
+      tags: [submissions]
+      summary: List pending community submissions (admin only)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected, flagged]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Submission"
+
+  /submissions/{id}/approve:
+    post:
+      operationId: approveSubmission
+      tags: [submissions]
+      summary: Admin approves a submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  /submissions/{id}/reject:
+    post:
+      operationId: rejectSubmission
+      tags: [submissions]
+      summary: Admin rejects a submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  # ADMIN
+  /admin/dashboard:
+    get:
+      operationId: getAdminDashboard
+      tags: [admin]
+      summary: Get admin dashboard summary
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboard"
+
+  /admin/users:
+    get:
+      operationId: listUsers
+      tags: [admin]
+      summary: List all users
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /admin/users/{id}/role:
+    patch:
+      operationId: updateUserRole
+      tags: [admin]
+      summary: Update user role
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserRoleUpdate"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /admin/flagged:
+    get:
+      operationId: listFlaggedContent
+      tags: [admin]
+      summary: List AI-flagged content requiring admin review
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlaggedContent"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +445,331 @@ components:
       required:
         - status
 
+    # AUTH SCHEMAS
+    RegisterInput:
+      type: object
+      required: [email, password, role]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        role:
+          type: string
+          enum: [admin, viewer]
+        displayName:
+          type: string
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    PinInput:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+          minLength: 4
+          maxLength: 8
+
+    SetPinInput:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+          minLength: 4
+          maxLength: 8
+
+    PinVerifyResponse:
+      type: object
+      required: [valid, unfilteredToken]
+      properties:
+        valid:
+          type: boolean
+        unfilteredToken:
+          type: ["string", "null"]
+
+    AuthResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+
+    User:
+      type: object
+      required: [id, email, role, tier]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        displayName:
+          type: ["string", "null"]
+        role:
+          type: string
+          enum: [admin, viewer]
+        tier:
+          type: string
+          enum: [free, premium]
+        hasPin:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    UserRoleUpdate:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [admin, viewer]
+
+    # MEDIA SCHEMAS
+    MediaInput:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [file, url]
+        title:
+          type: string
+        fileName:
+          type: ["string", "null"]
+        fileHash:
+          type: ["string", "null"]
+        url:
+          type: ["string", "null"]
+        mimeType:
+          type: ["string", "null"]
+
+    MediaEntry:
+      type: object
+      required: [id, type, title, safetyStatus, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [file, url]
+        title:
+          type: string
+        fileName:
+          type: ["string", "null"]
+        fileHash:
+          type: ["string", "null"]
+        url:
+          type: ["string", "null"]
+        mimeType:
+          type: ["string", "null"]
+        safetyStatus:
+          type: string
+          enum: [safe, unpreviewed, flagged]
+        jumpFrameCount:
+          type: integer
+        lastWatched:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    MediaDetail:
+      type: object
+      required: [media, jumpFrames, safetyStatus]
+      properties:
+        media:
+          $ref: "#/components/schemas/MediaEntry"
+        jumpFrames:
+          type: array
+          items:
+            $ref: "#/components/schemas/JumpFrame"
+        safetyStatus:
+          type: string
+          enum: [safe, unpreviewed, flagged]
+        aiFlag:
+          $ref: "#/components/schemas/AiFlag"
+
+    MediaLookupInput:
+      type: object
+      properties:
+        title:
+          type: ["string", "null"]
+        fileHash:
+          type: ["string", "null"]
+
+    MediaLookupResult:
+      type: object
+      required: [found, safetyStatus]
+      properties:
+        found:
+          type: boolean
+        mediaId:
+          type: ["integer", "null"]
+        safetyStatus:
+          type: string
+          enum: [safe, unpreviewed, flagged]
+        jumpFrameCount:
+          type: integer
+        source:
+          type: ["string", "null"]
+          enum: [personal, global, null]
+
+    # JUMP FRAME SCHEMAS
+    JumpFrame:
+      type: object
+      required: [id, mediaId, startTime, endTime, category, source, validated, createdAt]
+      properties:
+        id:
+          type: integer
+        mediaId:
+          type: integer
+        startTime:
+          type: number
+          description: seconds
+        endTime:
+          type: number
+          description: seconds
+        category:
+          type: string
+          enum: [violence, sexual, language, other]
+        source:
+          type: string
+          enum: [personal, global]
+        validated:
+          type: boolean
+        submittedBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    JumpFrameInput:
+      type: object
+      required: [mediaId, startTime, endTime, category]
+      properties:
+        mediaId:
+          type: integer
+        startTime:
+          type: number
+        endTime:
+          type: number
+        category:
+          type: string
+          enum: [violence, sexual, language, other]
+        submitToGlobal:
+          type: boolean
+
+    # SUBMISSION SCHEMAS
+    Submission:
+      type: object
+      required: [id, mediaId, startTime, endTime, category, status, submittedBy, createdAt]
+      properties:
+        id:
+          type: integer
+        mediaId:
+          type: integer
+        mediaTitle:
+          type: ["string", "null"]
+        startTime:
+          type: number
+        endTime:
+          type: number
+        category:
+          type: string
+          enum: [violence, sexual, language, other]
+        status:
+          type: string
+          enum: [pending, approved, rejected, flagged]
+        submittedBy:
+          type: integer
+        submitterEmail:
+          type: ["string", "null"]
+        aiFlag:
+          $ref: "#/components/schemas/AiFlag"
+        createdAt:
+          type: string
+          format: date-time
+
+    AiFlag:
+      type: ["object", "null"]
+      properties:
+        flagged:
+          type: boolean
+        reason:
+          type: ["string", "null"]
+        severity:
+          type: string
+          enum: [low, medium, high, extreme]
+
+    FlaggedContent:
+      type: object
+      required: [id, type, severity, reason, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [submission, media]
+        referenceId:
+          type: integer
+        severity:
+          type: string
+          enum: [low, medium, high, extreme]
+        reason:
+          type: string
+        resolved:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    # ADMIN DASHBOARD
+    AdminDashboard:
+      type: object
+      required: [totalUsers, totalMedia, pendingSubmissions, flaggedCount, recentActivity]
+      properties:
+        totalUsers:
+          type: integer
+        totalMedia:
+          type: integer
+        pendingSubmissions:
+          type: integer
+        flaggedCount:
+          type: integer
+        globalFrameCount:
+          type: integer
+        premiumUsers:
+          type: integer
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+
+    ActivityItem:
+      type: object
+      required: [id, type, description, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [submission, validation, flag, user_join]
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
