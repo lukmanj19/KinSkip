@@ -6,6 +6,7 @@ import connectPgSimple from "connect-pg-simple";
 import { pool } from "@workspace/db";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { tokenAuth } from "./middleware/tokenAuth";
 
 const PgSession = connectPgSimple(session);
 
@@ -57,6 +58,7 @@ app.use(
   })
 );
 
+app.use(tokenAuth);
 app.use("/api", router);
 
 export default app;

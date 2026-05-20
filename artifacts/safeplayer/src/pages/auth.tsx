@@ -54,7 +54,7 @@ export default function AuthPage() {
       { data: values },
       {
         onSuccess: (data) => {
-          login(data.user);
+          login(data.user, data.token);
           setLocation(data.user.role === "admin" ? "/admin" : "/dashboard");
         },
         onError: () => {
@@ -73,7 +73,7 @@ export default function AuthPage() {
       { data: values },
       {
         onSuccess: (data) => {
-          login(data.user);
+          login(data.user, data.token);
           setLocation(data.user.role === "admin" ? "/admin" : "/dashboard");
         },
         onError: () => {

@@ -49,7 +49,13 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     .returning();
 
   req.session.userId = user.id;
-  res.status(201).json({ user: userToPublic(user), token: String(user.id) });
+  req.session.save((err) => {
+    if (err) {
+      res.status(500).json({ error: "Session error" });
+      return;
+    }
+    res.status(201).json({ user: userToPublic(user), token: req.sessionID });
+  });
 });
 
 // POST /auth/login
@@ -78,7 +84,13 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   req.session.userId = user.id;
-  res.json({ user: userToPublic(user), token: String(user.id) });
+  req.session.save((err) => {
+    if (err) {
+      res.status(500).json({ error: "Session error" });
+      return;
+    }
+    res.json({ user: userToPublic(user), token: req.sessionID });
+  });
 });
 
 // POST /auth/logout
