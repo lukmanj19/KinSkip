@@ -16,6 +16,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TimeInput } from "@/components/time-input";
 
 const jumpFrameSchema = z.object({
   startTime: z.coerce.number().min(0),
@@ -197,25 +198,27 @@ export default function Player() {
                   </Button>
                 </DrawerTrigger>
                 <DrawerContent>
-                  <div className="mx-auto w-full max-w-sm p-6">
+                  <div className="mx-auto w-full max-w-lg p-6">
                     <DrawerHeader>
                       <DrawerTitle>Add Skip Frame</DrawerTitle>
                       <DrawerDescription>Mark a segment to be skipped during playback.</DrawerDescription>
                     </DrawerHeader>
                     <Form {...jumpFrameForm}>
-                      <form onSubmit={jumpFrameForm.handleSubmit(handleCreateJumpFrame)} className="space-y-4 mt-4">
-                        <div className="grid grid-cols-2 gap-4">
+                      <form onSubmit={jumpFrameForm.handleSubmit(handleCreateJumpFrame)} className="space-y-5 mt-4">
+                        <div className="space-y-4">
                           <FormField
                             control={jumpFrameForm.control}
                             name="startTime"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Start Time (s)</FormLabel>
-                                <div className="flex gap-2">
+                                <FormLabel>Start Time</FormLabel>
+                                <div className="flex items-end gap-3">
                                   <FormControl>
-                                    <Input type="number" step="0.1" {...field} />
+                                    <TimeInput value={field.value} onChange={field.onChange} />
                                   </FormControl>
-                                  <Button type="button" variant="secondary" onClick={() => handleGetCurrentTime("startTime")}>Current</Button>
+                                  <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => handleGetCurrentTime("startTime")}>
+                                    Use Current
+                                  </Button>
                                 </div>
                                 <FormMessage />
                               </FormItem>
@@ -226,12 +229,14 @@ export default function Player() {
                             name="endTime"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>End Time (s)</FormLabel>
-                                <div className="flex gap-2">
+                                <FormLabel>End Time</FormLabel>
+                                <div className="flex items-end gap-3">
                                   <FormControl>
-                                    <Input type="number" step="0.1" {...field} />
+                                    <TimeInput value={field.value} onChange={field.onChange} />
                                   </FormControl>
-                                  <Button type="button" variant="secondary" onClick={() => handleGetCurrentTime("endTime")}>Current</Button>
+                                  <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => handleGetCurrentTime("endTime")}>
+                                    Use Current
+                                  </Button>
                                 </div>
                                 <FormMessage />
                               </FormItem>
