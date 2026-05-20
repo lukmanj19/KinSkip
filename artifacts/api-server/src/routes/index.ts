@@ -5,6 +5,7 @@ import mediaRouter from "./media";
 import jumpframesRouter from "./jumpframes";
 import submissionsRouter from "./submissions";
 import adminRouter from "./admin";
+import subtitlesRouter from "./subtitles";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(mediaRouter);
 router.use(jumpframesRouter);
 router.use(submissionsRouter);
 router.use(adminRouter);
+router.use(subtitlesRouter);
 
 export default router;
