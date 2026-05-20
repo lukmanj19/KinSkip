@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useListMedia, useCreateMedia, getListMediaQueryKey, useLookupMedia } from "@workspace/api-client-react";
+import { useListMedia, useCreateMedia, getListMediaQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { storeBlobUrl } from "@/lib/mediaStore";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -43,17 +44,20 @@ export default function Dashboard() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Keep a reference to the File object so we can create a blob URL after
+    // the server responds with the new media entry's ID.
+    const capturedFile = file;
     const fileHash = `${file.size}-${file.name}`;
-    
-    // In a real app, we'd lookup first. For simplicity here, we just create.
+
     createMediaMutation.mutate(
       { data: { type: "file", fileName: file.name, fileHash, title: file.name.replace(/\.[^/.]+$/, ""), mimeType: file.type } },
       {
         onSuccess: (newMedia) => {
+          // Create a blob URL from the File object and store it keyed by mediaId.
+          // This lets the player page resolve the local file without uploading anything.
+          storeBlobUrl(newMedia.id, capturedFile);
           queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
-          toast({ title: "File prepared", description: "You can now play it." });
-          // Store actual file in session/state for the player if needed, but since it's local we usually use an object URL.
-          // For this mockup, we just assume player uses file picker if not passed.
+          toast({ title: "File ready", description: "Click Play to start with SafeMode." });
         },
         onError: () => {
           toast({ title: "Failed to process file", variant: "destructive" });

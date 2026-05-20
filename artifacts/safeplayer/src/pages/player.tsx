@@ -1,9 +1,10 @@
 import { useAuth } from "@/lib/auth";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { getBlobUrl } from "@/lib/mediaStore";
 import { useRoute } from "wouter";
 import { useGetMedia, getGetMediaQueryKey, useListJumpFrames, useCreateJumpFrame, getListJumpFramesQueryKey, useVerifyPin } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Settings, Flag, SkipForward } from "lucide-react";
+import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag, SkipForward, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -131,6 +132,10 @@ export default function Player() {
 
   const { media, safetyStatus } = mediaDetail;
 
+  // For local files, resolve the blob URL stored when the user picked the file.
+  // For URL-type entries, use the remote URL directly.
+  const videoSrc = media.type === "file" ? (getBlobUrl(media.id) ?? undefined) : (media.url ?? undefined);
+
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
       {/* Status Banner */}
@@ -152,12 +157,20 @@ export default function Player() {
 
       {/* Player Section */}
       <div className="relative bg-black rounded-xl overflow-hidden aspect-video border shadow-2xl">
-        <video 
-          ref={videoRef}
-          controls 
-          className="w-full h-full"
-          src={media.url || undefined} // Ideally local blobs would be resolved here
-        />
+        {media.type === "file" && !videoSrc ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-muted-foreground p-8 text-center">
+            <Film className="w-12 h-12 opacity-40" />
+            <p className="text-sm font-medium">Local file not available in this session.</p>
+            <p className="text-xs opacity-70">Go back to the dashboard and re-select the file to play it.</p>
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            controls
+            className="w-full h-full"
+            src={videoSrc}
+          />
+        )}
         {skipFlash && (
           <div className="absolute inset-0 bg-safe/20 pointer-events-none flex items-center justify-center animate-out fade-out duration-500">
             <div className="bg-background/80 text-foreground px-6 py-3 rounded-full flex items-center gap-2 text-lg font-bold backdrop-blur-sm">
