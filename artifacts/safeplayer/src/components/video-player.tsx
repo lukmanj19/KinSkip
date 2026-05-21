@@ -272,7 +272,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full bg-black select-none"
+        className="absolute inset-0 bg-black select-none"
         onMouseMove={resetHideTimer}
         onMouseEnter={resetHideTimer}
         onMouseLeave={() => {

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { db, jumpFramesTable, mediaTable, submissionsTable, activityTable, flaggedContentTable } from "@workspace/db";
 import {
   ListJumpFramesQueryParams,
@@ -19,6 +19,8 @@ function requireAuth(req: any, res: any): number | null {
 }
 
 // GET /jumpframes
+// Returns personal frames (by this user) + validated global frames for ALL media
+// sharing the same normalized title — so re-uploading the same movie finds existing frames.
 router.get("/jumpframes", async (req, res): Promise<void> => {
   const userId = requireAuth(req, res);
   if (!userId) return;
@@ -32,32 +34,43 @@ router.get("/jumpframes", async (req, res): Promise<void> => {
     return;
   }
 
-  const { mediaId, source } = parsed.data;
+  const { mediaId } = parsed.data;
 
-  let frames;
-  if (!source || source === "all") {
-    frames = await db
-      .select()
-      .from(jumpFramesTable)
-      .where(
-        or(
-          and(eq(jumpFramesTable.mediaId, mediaId), eq(jumpFramesTable.source, "personal")),
-          and(eq(jumpFramesTable.mediaId, mediaId), eq(jumpFramesTable.source, "global"), eq(jumpFramesTable.validated, true))
-        )
-      )
-      .orderBy(jumpFramesTable.startTime);
-  } else {
-    frames = await db
-      .select()
-      .from(jumpFramesTable)
-      .where(
-        and(
-          eq(jumpFramesTable.mediaId, mediaId),
-          eq(jumpFramesTable.source, source as "personal" | "global")
-        )
-      )
-      .orderBy(jumpFramesTable.startTime);
+  // Resolve the title for this media entry
+  const [currentMedia] = await db
+    .select({ id: mediaTable.id, title: mediaTable.title })
+    .from(mediaTable)
+    .where(eq(mediaTable.id, mediaId))
+    .limit(1);
+
+  if (!currentMedia) {
+    res.json([]);
+    return;
   }
+
+  // Find every media entry that shares the same normalized title
+  const sameTitleMedia = await db
+    .select({ id: mediaTable.id })
+    .from(mediaTable)
+    .where(sql`LOWER(TRIM(${mediaTable.title})) = LOWER(TRIM(${currentMedia.title}))`);
+
+  const allMediaIds = sameTitleMedia.map((m) => m.id);
+
+  // Return: personal frames created by this user for any same-title media
+  //       + globally validated frames for any same-title media
+  const frames = await db
+    .select()
+    .from(jumpFramesTable)
+    .where(
+      and(
+        inArray(jumpFramesTable.mediaId, allMediaIds),
+        or(
+          and(eq(jumpFramesTable.source, "personal"), eq(jumpFramesTable.submittedBy, userId)),
+          and(eq(jumpFramesTable.source, "global"), eq(jumpFramesTable.validated, true))
+        )
+      )
+    )
+    .orderBy(jumpFramesTable.startTime);
 
   res.json(frames.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() })));
 });

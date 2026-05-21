@@ -74,7 +74,7 @@ export default function Player() {
 
   const jumpFrameForm = useForm<z.infer<typeof jumpFrameSchema>>({
     resolver: zodResolver(jumpFrameSchema),
-    defaultValues: { startTime: 0, endTime: 0, category: "other", submitToGlobal: false },
+    defaultValues: { startTime: 0, endTime: 0, category: "other", submitToGlobal: true },
   });
 
   const handleCreateJumpFrame = (values: z.infer<typeof jumpFrameSchema>) => {
@@ -125,7 +125,7 @@ export default function Player() {
       )}
 
       {/* Custom Video Player */}
-      <div className="rounded-xl overflow-hidden aspect-video border shadow-2xl bg-black">
+      <div className="rounded-xl overflow-hidden aspect-video border shadow-2xl bg-black relative">
         <VideoPlayer
           ref={videoRef}
           src={videoSrc}

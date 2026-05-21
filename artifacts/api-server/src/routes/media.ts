@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, and, desc, or } from "drizzle-orm";
+import { eq, and, desc, or, inArray } from "drizzle-orm";
 import { db, mediaTable, jumpFramesTable } from "@workspace/db";
 import { CreateMediaBody, GetMediaParams, DeleteMediaParams, LookupMediaBody } from "@workspace/api-zod";
 import { sql } from "drizzle-orm";
@@ -117,14 +117,25 @@ router.get("/media/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  // Get jump frames: personal + global validated
+  // Find all media sharing the same normalized title (same movie, different file uploads)
+  const sameTitleMedia = await db
+    .select({ id: mediaTable.id })
+    .from(mediaTable)
+    .where(sql`LOWER(TRIM(${mediaTable.title})) = LOWER(TRIM(${media.title}))`);
+
+  const allMediaIds = sameTitleMedia.map((m) => m.id);
+
+  // Get jump frames: personal (by this user) + validated global for any same-title media
   const frames = await db
     .select()
     .from(jumpFramesTable)
     .where(
-      or(
-        and(eq(jumpFramesTable.mediaId, media.id), eq(jumpFramesTable.source, "personal")),
-        and(eq(jumpFramesTable.mediaId, media.id), eq(jumpFramesTable.source, "global"), eq(jumpFramesTable.validated, true))
+      and(
+        inArray(jumpFramesTable.mediaId, allMediaIds),
+        or(
+          and(eq(jumpFramesTable.source, "personal"), eq(jumpFramesTable.submittedBy, userId)),
+          and(eq(jumpFramesTable.source, "global"), eq(jumpFramesTable.validated, true))
+        )
       )
     )
     .orderBy(jumpFramesTable.startTime);
@@ -135,7 +146,10 @@ router.get("/media/:id", async (req, res): Promise<void> => {
     .set({ lastWatched: new Date() })
     .where(eq(mediaTable.id, media.id));
 
-  const jumpFrames = frames.map((f) => ({
+  // Derive safety status: if frames exist from any same-title source, it's safe
+  const derivedSafetyStatus = frames.length > 0 ? "safe" : media.safetyStatus;
+
+  const jumpFrameList = frames.map((f) => ({
     ...f,
     createdAt: f.createdAt.toISOString(),
   }));
@@ -147,8 +161,8 @@ router.get("/media/:id", async (req, res): Promise<void> => {
       lastWatched: media.lastWatched?.toISOString() ?? null,
       createdAt: media.createdAt.toISOString(),
     },
-    jumpFrames,
-    safetyStatus: media.safetyStatus,
+    jumpFrames: jumpFrameList,
+    safetyStatus: derivedSafetyStatus,
     aiFlag: null,
   });
 });
