@@ -1,10 +1,10 @@
 import { useAuth } from "@/lib/auth";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { getBlobUrl } from "@/lib/mediaStore";
 import { useRoute } from "wouter";
 import {
   useGetMedia, getGetMediaQueryKey,
-  useListJumpFrames, useCreateJumpFrame, getListJumpFramesQueryKey,
+  useListJumpFrames, useCreateJumpFrame, useDeleteJumpFrame, getListJumpFramesQueryKey,
   useVerifyPin
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TimeInput } from "@/components/time-input";
 import { VideoPlayer } from "@/components/video-player";
+import { FrameTimeline } from "@/components/frame-timeline";
 
 const jumpFrameSchema = z.object({
   startTime: z.coerce.number().min(0),
@@ -41,8 +42,33 @@ export default function Player() {
   const [unfilteredToken, setUnfilteredToken] = useState<string | null>(null);
   const [isPinDialogOpen, setIsPinDialogOpen] = useState(false);
   const [pin, setPin] = useState("");
+  const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
+  const [playerDuration, setPlayerDuration] = useState(0);
   const verifyPinMutation = useVerifyPin();
   const createJumpFrameMutation = useCreateJumpFrame();
+  const deleteJumpFrameMutation = useDeleteJumpFrame();
+
+  const handleProgressUpdate = useCallback((t: number, d: number) => {
+    setPlayerCurrentTime(t);
+    setPlayerDuration(d);
+  }, []);
+
+  const handleSeek = useCallback((time: number) => {
+    if (videoRef.current) videoRef.current.currentTime = time;
+  }, []);
+
+  const handleDeleteFrame = useCallback((id: number) => {
+    deleteJumpFrameMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListJumpFramesQueryKey({ mediaId }) });
+          toast({ title: "Skip frame deleted" });
+        },
+        onError: () => toast({ title: "Failed to delete frame", variant: "destructive" }),
+      }
+    );
+  }, [deleteJumpFrameMutation, queryClient, mediaId, toast]);
 
   const { data: mediaDetail, isLoading: isMediaLoading } = useGetMedia(mediaId, {
     query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId) }
@@ -131,8 +157,19 @@ export default function Player() {
           src={videoSrc}
           jumpFrames={jumpFrames ?? []}
           filteredMode={!unfilteredToken}
+          onProgressUpdate={handleProgressUpdate}
         />
       </div>
+
+      {/* Skip Frame Timeline */}
+      <FrameTimeline
+        jumpFrames={jumpFrames ?? []}
+        duration={playerDuration}
+        currentTime={playerCurrentTime}
+        onSeek={handleSeek}
+        onDeleteFrame={handleDeleteFrame}
+        canDelete={user?.role === "admin"}
+      />
 
       {/* Media Info + Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-card p-4 rounded-lg border">

@@ -23,6 +23,7 @@ interface VideoPlayerProps {
   src: string | undefined;
   jumpFrames?: JumpFrame[];
   filteredMode?: boolean;
+  onProgressUpdate?: (currentTime: number, duration: number) => void;
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -54,7 +55,7 @@ function srtToVtt(text: string): string {
 }
 
 export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
-  ({ src, jumpFrames = [], filteredMode = true }, forwardedRef) => {
+  ({ src, jumpFrames = [], filteredMode = true, onProgressUpdate }, forwardedRef) => {
     const { toast } = useToast();
     const internalRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -130,12 +131,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [volume]);
 
-    // Skip engine
+    // Skip engine + progress broadcast
     const handleTimeUpdate = useCallback(() => {
       const vid = internalRef.current;
       if (!vid) return;
       const t = vid.currentTime;
       setCurrentTime(t);
+      onProgressUpdate?.(t, vid.duration || 0);
       if (!filteredMode) return;
       for (const frame of jumpFrames) {
         if (t >= frame.startTime && t < frame.endTime) {
@@ -146,7 +148,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
           break;
         }
       }
-    }, [jumpFrames, filteredMode, toast]);
+    }, [jumpFrames, filteredMode, toast, onProgressUpdate]);
 
     // Seek bar pointer drag
     const handleProgressPointer = useCallback(
@@ -288,7 +290,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
           onPlay={() => { setIsPlaying(true); resetHideTimer(); }}
           onPause={() => { setIsPlaying(false); setShowControls(true); }}
           onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={() => setDuration(internalRef.current?.duration ?? 0)}
+          onLoadedMetadata={() => {
+            const d = internalRef.current?.duration ?? 0;
+            setDuration(d);
+            onProgressUpdate?.(0, d);
+          }}
           onVolumeChange={() => {
             const v = internalRef.current;
             if (v) { setVolume(v.volume); setIsMuted(v.muted); }
