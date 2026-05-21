@@ -161,15 +161,17 @@ export default function Player() {
         />
       </div>
 
-      {/* Skip Frame Timeline */}
-      <FrameTimeline
-        jumpFrames={jumpFrames ?? []}
-        duration={playerDuration}
-        currentTime={playerCurrentTime}
-        onSeek={handleSeek}
-        onDeleteFrame={handleDeleteFrame}
-        canDelete={user?.role === "admin"}
-      />
+      {/* Skip Frame Timeline — only shown when this media has frames */}
+      {(jumpFrames ?? []).length > 0 && (
+        <FrameTimeline
+          jumpFrames={jumpFrames ?? []}
+          duration={playerDuration}
+          currentTime={playerCurrentTime}
+          onSeek={handleSeek}
+          onDeleteFrame={handleDeleteFrame}
+          canDelete={user?.role === "admin"}
+        />
+      )}
 
       {/* Media Info + Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-card p-4 rounded-lg border">
