@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { eq, and, or, inArray, sql } from "drizzle-orm";
-import { db, jumpFramesTable, mediaTable, submissionsTable, activityTable, flaggedContentTable } from "@workspace/db";
+import { eq, and, or } from "drizzle-orm";
+import { db, jumpFramesTable, mediaTable, submissionsTable, activityTable, flaggedContentTable } from "@workspace/db"; // mediaTable kept for POST (updates safetyStatus)
 import {
   ListJumpFramesQueryParams,
   CreateJumpFrameBody,
@@ -19,8 +19,7 @@ function requireAuth(req: any, res: any): number | null {
 }
 
 // GET /jumpframes
-// Returns personal frames (by this user) + validated global frames for ALL media
-// sharing the same normalized title — so re-uploading the same movie finds existing frames.
+// Returns frames strictly belonging to the requested mediaId only.
 router.get("/jumpframes", async (req, res): Promise<void> => {
   const userId = requireAuth(req, res);
   if (!userId) return;
@@ -36,34 +35,12 @@ router.get("/jumpframes", async (req, res): Promise<void> => {
 
   const { mediaId } = parsed.data;
 
-  // Resolve the title for this media entry
-  const [currentMedia] = await db
-    .select({ id: mediaTable.id, title: mediaTable.title })
-    .from(mediaTable)
-    .where(eq(mediaTable.id, mediaId))
-    .limit(1);
-
-  if (!currentMedia) {
-    res.json([]);
-    return;
-  }
-
-  // Find every media entry that shares the same normalized title
-  const sameTitleMedia = await db
-    .select({ id: mediaTable.id })
-    .from(mediaTable)
-    .where(sql`LOWER(TRIM(${mediaTable.title})) = LOWER(TRIM(${currentMedia.title}))`);
-
-  const allMediaIds = sameTitleMedia.map((m) => m.id);
-
-  // Return: personal frames created by this user for any same-title media
-  //       + globally validated frames for any same-title media
   const frames = await db
     .select()
     .from(jumpFramesTable)
     .where(
       and(
-        inArray(jumpFramesTable.mediaId, allMediaIds),
+        eq(jumpFramesTable.mediaId, mediaId),
         or(
           and(eq(jumpFramesTable.source, "personal"), eq(jumpFramesTable.submittedBy, userId)),
           and(eq(jumpFramesTable.source, "global"), eq(jumpFramesTable.validated, true))
