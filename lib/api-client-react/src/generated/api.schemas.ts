@@ -96,6 +96,19 @@ export interface UserRoleUpdate {
   role: UserRoleUpdateRole;
 }
 
+export type UpdateMediaSafetyInputSafetyStatus = typeof UpdateMediaSafetyInputSafetyStatus[keyof typeof UpdateMediaSafetyInputSafetyStatus];
+
+
+export const UpdateMediaSafetyInputSafetyStatus = {
+  safe: 'safe',
+  unpreviewed: 'unpreviewed',
+  flagged: 'flagged',
+} as const;
+
+export interface UpdateMediaSafetyInput {
+  safetyStatus: UpdateMediaSafetyInputSafetyStatus;
+}
+
 export type MediaInputType = typeof MediaInputType[keyof typeof MediaInputType];
 
 

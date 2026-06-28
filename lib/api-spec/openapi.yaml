@@ -206,6 +206,35 @@ paths:
         "204":
           description: Deleted
 
+  /media/{id}/safety:
+    patch:
+      operationId: updateMediaSafety
+      tags: [media]
+      summary: Update safety status of a media entry (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMediaSafetyInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaEntry"
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+
   /media/lookup:
     post:
       operationId: lookupMedia
@@ -536,6 +565,14 @@ components:
         role:
           type: string
           enum: [admin, viewer]
+
+    UpdateMediaSafetyInput:
+      type: object
+      required: [safetyStatus]
+      properties:
+        safetyStatus:
+          type: string
+          enum: [safe, unpreviewed, flagged]
 
     # MEDIA SCHEMAS
     MediaInput:

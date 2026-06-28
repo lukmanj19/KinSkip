@@ -44,6 +44,8 @@ export * from './setPinInput';
 export * from './submission';
 export * from './submissionCategory';
 export * from './submissionStatus';
+export * from './updateMediaSafetyInput';
+export * from './updateMediaSafetyInputSafetyStatus';
 export * from './user';
 export * from './userRole';
 export * from './userRoleUpdate';

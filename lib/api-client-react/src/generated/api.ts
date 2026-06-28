@@ -39,6 +39,7 @@ import type {
   RegisterInput,
   SetPinInput,
   Submission,
+  UpdateMediaSafetyInput,
   User,
   UserRoleUpdate
 } from './api.schemas';
@@ -856,6 +857,78 @@ export const useDeleteMedia = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteMediaMutationOptions(options));
+    }
+
+export const getUpdateMediaSafetyUrl = (id: number,) => {
+
+
+
+
+  return `/api/media/${id}/safety`
+}
+
+/**
+ * @summary Update safety status of a media entry (admin only)
+ */
+export const updateMediaSafety = async (id: number,
+    updateMediaSafetyInput: UpdateMediaSafetyInput, options?: RequestInit): Promise<MediaEntry> => {
+
+  return customFetch<MediaEntry>(getUpdateMediaSafetyUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateMediaSafetyInput,)
+  }
+);}
+
+
+
+
+export const getUpdateMediaSafetyMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMediaSafety>>, TError,{id: number;data: BodyType<UpdateMediaSafetyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateMediaSafety>>, TError,{id: number;data: BodyType<UpdateMediaSafetyInput>}, TContext> => {
+
+const mutationKey = ['updateMediaSafety'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMediaSafety>>, {id: number;data: BodyType<UpdateMediaSafetyInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateMediaSafety(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateMediaSafetyMutationResult = NonNullable<Awaited<ReturnType<typeof updateMediaSafety>>>
+    export type UpdateMediaSafetyMutationBody = BodyType<UpdateMediaSafetyInput>
+    export type UpdateMediaSafetyMutationError = ErrorType<void>
+
+    /**
+ * @summary Update safety status of a media entry (admin only)
+ */
+export const useUpdateMediaSafety = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMediaSafety>>, TError,{id: number;data: BodyType<UpdateMediaSafetyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateMediaSafety>>,
+        TError,
+        {id: number;data: BodyType<UpdateMediaSafetyInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateMediaSafetyMutationOptions(options));
     }
 
 export const getLookupMediaUrl = () => {

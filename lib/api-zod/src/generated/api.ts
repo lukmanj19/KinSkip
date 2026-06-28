@@ -180,6 +180,32 @@ export const DeleteMediaParams = zod.object({
 
 
 /**
+ * @summary Update safety status of a media entry (admin only)
+ */
+export const UpdateMediaSafetyParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateMediaSafetyBody = zod.object({
+  "safetyStatus": zod.enum(['safe', 'unpreviewed', 'flagged'])
+})
+
+export const UpdateMediaSafetyResponse = zod.object({
+  "id": zod.number(),
+  "type": zod.enum(['file', 'url']),
+  "title": zod.string(),
+  "fileName": zod.string().nullish(),
+  "fileHash": zod.string().nullish(),
+  "url": zod.string().nullish(),
+  "mimeType": zod.string().nullish(),
+  "safetyStatus": zod.enum(['safe', 'unpreviewed', 'flagged']),
+  "jumpFrameCount": zod.number().optional(),
+  "lastWatched": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Lookup safety status by title or file hash
  */
 export const LookupMediaBody = zod.object({

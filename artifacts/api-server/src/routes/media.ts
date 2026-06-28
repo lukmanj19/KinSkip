@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { eq, and, desc, or } from "drizzle-orm";
-import { db, mediaTable, jumpFramesTable } from "@workspace/db";
-import { CreateMediaBody, GetMediaParams, DeleteMediaParams, LookupMediaBody } from "@workspace/api-zod";
+import { db, mediaTable, jumpFramesTable, usersTable } from "@workspace/db";
+import { CreateMediaBody, GetMediaParams, DeleteMediaParams, LookupMediaBody, UpdateMediaSafetyBody, UpdateMediaSafetyParams } from "@workspace/api-zod";
 
 const router = Router();
 
@@ -221,6 +221,59 @@ router.get("/media/:id", async (req, res): Promise<void> => {
     jumpFrames: jumpFrameList,
     safetyStatus: derivedSafetyStatus,
     aiFlag: null,
+  });
+});
+
+// PATCH /media/:id/safety — admin only
+router.patch("/media/:id/safety", async (req, res): Promise<void> => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [caller] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!caller || caller.role !== "admin") {
+    res.status(403).json({ error: "Admin only" });
+    return;
+  }
+
+  const params = UpdateMediaSafetyParams.safeParse({ id: Number(req.params.id) });
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const parsed = UpdateMediaSafetyBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input" });
+    return;
+  }
+
+  const [media] = await db
+    .select()
+    .from(mediaTable)
+    .where(and(eq(mediaTable.id, params.data.id), eq(mediaTable.userId, userId)))
+    .limit(1);
+
+  if (!media) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(mediaTable)
+    .set({ safetyStatus: parsed.data.safetyStatus })
+    .where(eq(mediaTable.id, media.id))
+    .returning();
+
+  const frames = await db
+    .select()
+    .from(jumpFramesTable)
+    .where(eq(jumpFramesTable.mediaId, media.id));
+
+  res.json({
+    ...updated,
+    jumpFrameCount: frames.length,
+    lastWatched: updated.lastWatched?.toISOString() ?? null,
+    createdAt: updated.createdAt.toISOString(),
   });
 });
 
