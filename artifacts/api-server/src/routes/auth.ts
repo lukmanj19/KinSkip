@@ -1,6 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, count } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import {
   RegisterBody,
@@ -31,6 +31,21 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     return;
   }
   const { email, password, role, displayName } = parsed.data;
+
+  // Enforce maximum of 2 administrator accounts
+  if (role === "admin") {
+    const [{ adminCount }] = await db
+      .select({ adminCount: count() })
+      .from(usersTable)
+      .where(eq(usersTable.role, "admin"));
+    if (adminCount >= 2) {
+      res.status(403).json({
+        error: "ADMIN_LIMIT_REACHED",
+        message: "This device already has 2 administrator accounts. Contact the manufacturer for review.",
+      });
+      return;
+    }
+  }
 
   const existing = await db
     .select()

@@ -18,11 +18,14 @@ function requireAuth(req: any, res: any): number | null {
   return req.session.userId as number;
 }
 
+function optionalAuth(req: any): number | null {
+  return (req.session?.userId as number) ?? null;
+}
+
 // GET /jumpframes
 // Returns frames strictly belonging to the requested mediaId only.
 router.get("/jumpframes", async (req, res): Promise<void> => {
-  const userId = requireAuth(req, res);
-  if (!userId) return;
+  const userId = optionalAuth(req);
 
   const parsed = ListJumpFramesQueryParams.safeParse({
     mediaId: Number(req.query.mediaId),
@@ -34,6 +37,22 @@ router.get("/jumpframes", async (req, res): Promise<void> => {
   }
 
   const { mediaId } = parsed.data;
+
+  // Guest mode: no session — only return globally validated frames for safe media
+  if (!userId) {
+    const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, mediaId)).limit(1);
+    if (!media || media.safetyStatus !== "safe") {
+      res.json([]);
+      return;
+    }
+    const frames = await db
+      .select()
+      .from(jumpFramesTable)
+      .where(and(eq(jumpFramesTable.mediaId, mediaId), eq(jumpFramesTable.validated, true)))
+      .orderBy(jumpFramesTable.startTime);
+    res.json(frames.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() })));
+    return;
+  }
 
   const frames = await db
     .select()

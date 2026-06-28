@@ -13,10 +13,36 @@ function requireAuth(req: any, res: any): number | null {
   return req.session.userId as number;
 }
 
+function optionalAuth(req: any): number | null {
+  return (req.session?.userId as number) ?? null;
+}
+
 // GET /media
 router.get("/media", async (req, res): Promise<void> => {
-  const userId = requireAuth(req, res);
-  if (!userId) return;
+  const userId = optionalAuth(req);
+
+  // Guest mode: no session, serve safe content from the specified admin's library
+  if (!userId) {
+    const guestAdminId = Number(req.query.guestAdminId);
+    if (!guestAdminId || isNaN(guestAdminId)) {
+      res.json([]);
+      return;
+    }
+    const safeMedia = await db
+      .select()
+      .from(mediaTable)
+      .where(and(eq(mediaTable.userId, guestAdminId), eq(mediaTable.safetyStatus, "safe")))
+      .orderBy(desc(mediaTable.lastWatched), desc(mediaTable.createdAt))
+      .limit(50);
+    const result = await Promise.all(
+      safeMedia.map(async (m) => {
+        const frames = await db.select().from(jumpFramesTable).where(eq(jumpFramesTable.mediaId, m.id));
+        return { ...m, jumpFrameCount: frames.length, lastWatched: m.lastWatched?.toISOString() ?? null, createdAt: m.createdAt.toISOString() };
+      })
+    );
+    res.json(result);
+    return;
+  }
 
   const mediaList = await db
     .select()
@@ -55,6 +81,22 @@ router.post("/media", async (req, res): Promise<void> => {
     return;
   }
   const { type, title, fileName, fileHash, url, mimeType } = parsed.data;
+
+  // Collapse duplicates: if this user already has a media entry with the same
+  // fileHash, return the existing record instead of creating a new one.
+  if (fileHash) {
+    const [existing] = await db
+      .select()
+      .from(mediaTable)
+      .where(and(eq(mediaTable.userId, userId), eq(mediaTable.fileHash, fileHash)))
+      .limit(1);
+    if (existing) {
+      await db.update(mediaTable).set({ lastWatched: new Date() }).where(eq(mediaTable.id, existing.id));
+      const frames = await db.select().from(jumpFramesTable).where(eq(jumpFramesTable.mediaId, existing.id));
+      res.json({ ...existing, jumpFrameCount: frames.length, lastWatched: new Date().toISOString(), createdAt: existing.createdAt.toISOString() });
+      return;
+    }
+  }
 
   // Check if matching entry already exists in global db
   let safetyStatus: "safe" | "unpreviewed" | "flagged" = "unpreviewed";
@@ -96,12 +138,37 @@ router.post("/media", async (req, res): Promise<void> => {
 
 // GET /media/:id
 router.get("/media/:id", async (req, res): Promise<void> => {
-  const userId = requireAuth(req, res);
-  if (!userId) return;
+  const userId = optionalAuth(req);
 
   const params = GetMediaParams.safeParse({ id: Number(req.params.id) });
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  // Guest mode: no session — only return content that has been marked safe
+  if (!userId) {
+    const [media] = await db
+      .select()
+      .from(mediaTable)
+      .where(eq(mediaTable.id, params.data.id))
+      .limit(1);
+    if (!media || media.safetyStatus !== "safe") {
+      res.status(403).json({ error: "GUEST_RESTRICTED", message: "This content has not been approved for unrestricted viewing." });
+      return;
+    }
+    const frames = await db
+      .select()
+      .from(jumpFramesTable)
+      .where(and(eq(jumpFramesTable.mediaId, media.id), eq(jumpFramesTable.validated, true)))
+      .orderBy(jumpFramesTable.startTime);
+    const derivedSafetyStatus = frames.length > 0 ? "safe" : media.safetyStatus;
+    res.json({
+      media: { ...media, jumpFrameCount: frames.length, lastWatched: media.lastWatched?.toISOString() ?? null, createdAt: media.createdAt.toISOString() },
+      jumpFrames: frames.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() })),
+      safetyStatus: derivedSafetyStatus,
+      aiFlag: null,
+    });
     return;
   }
 

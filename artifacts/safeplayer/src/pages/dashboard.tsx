@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
+import { LAST_ADMIN_KEY } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useListMedia, useCreateMedia, getListMediaQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon, AlertTriangle } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon, AlertTriangle, LogIn } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,11 +16,26 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: mediaItems, isLoading } = useListMedia();
-  
+  const { data: mediaItems, isLoading } = useListMedia({ query: { enabled: !!user, queryKey: getListMediaQueryKey() } });
+
   const createMediaMutation = useCreateMedia();
-  
+
   const [urlInput, setUrlInput] = useState("");
+  const [guestMedia, setGuestMedia] = useState<any[]>([]);
+  const [guestLoading, setGuestLoading] = useState(false);
+
+  const lastAdminId = !user ? localStorage.getItem(LAST_ADMIN_KEY) : null;
+
+  // Fetch safe content for guest mode
+  useEffect(() => {
+    if (user || !lastAdminId) return;
+    setGuestLoading(true);
+    fetch(`/api/media?guestAdminId=${lastAdminId}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => setGuestMedia(Array.isArray(data) ? data : []))
+      .catch(() => setGuestMedia([]))
+      .finally(() => setGuestLoading(false));
+  }, [user, lastAdminId]);
 
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,8 +60,6 @@ export default function Dashboard() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Keep a reference to the File object so we can create a blob URL after
-    // the server responds with the new media entry's ID.
     const capturedFile = file;
     const fileHash = `${file.size}-${file.name}`;
 
@@ -53,8 +67,6 @@ export default function Dashboard() {
       { data: { type: "file", fileName: file.name, fileHash, title: file.name.replace(/\.[^/.]+$/, ""), mimeType: file.type } },
       {
         onSuccess: (newMedia) => {
-          // Create a blob URL from the File object and store it keyed by mediaId.
-          // This lets the player page resolve the local file without uploading anything.
           storeBlobUrl(newMedia.id, capturedFile);
           queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
           toast({ title: "File ready", description: "Click Play to start with SafeMode." });
@@ -91,6 +103,77 @@ export default function Dashboard() {
     );
   };
 
+  // ── Guest Mode ────────────────────────────────────────────────────────────
+  if (!user) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Library</h1>
+          <p className="text-muted-foreground mt-1">
+            {lastAdminId
+              ? "Showing admin-approved content. Sign in to manage your full library."
+              : "Sign in to access your media library."}
+          </p>
+        </div>
+
+        {!lastAdminId ? (
+          <div className="text-center py-16 border border-dashed rounded-lg space-y-4">
+            <Shield className="w-14 h-14 text-muted-foreground/40 mx-auto" />
+            <div>
+              <h3 className="text-lg font-semibold">No content available</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                An administrator must sign in and approve content before guests can watch it.
+              </p>
+            </div>
+            <Button asChild className="gap-2">
+              <Link href="/"><LogIn className="w-4 h-4" /> Sign In</Link>
+            </Button>
+          </div>
+        ) : guestLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 w-full" />)}
+          </div>
+        ) : guestMedia.length === 0 ? (
+          <div className="text-center py-12 border border-dashed rounded-lg space-y-3">
+            <ShieldCheck className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+            <p className="text-sm text-muted-foreground">No approved content yet. Ask your administrator to approve media for family viewing.</p>
+            <Button variant="outline" size="sm" asChild className="gap-1.5">
+              <Link href="/"><LogIn className="w-4 h-4" /> Sign In</Link>
+            </Button>
+          </div>
+        ) : (
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Approved Content</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {guestMedia.map((media: any) => (
+                <Card key={media.id} className="hover-elevate transition-colors group">
+                  <CardHeader className="pb-2">
+                    <div className="flex justify-between items-start">
+                      <CardTitle className="text-base truncate pr-4" title={media.title}>{media.title}</CardTitle>
+                      <StatusBadge status={media.safetyStatus} />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground truncate">{media.type === 'file' ? media.fileName : media.url}</p>
+                    {media.jumpFrameCount !== undefined && (
+                      <p className="text-xs text-muted-foreground mt-2">{media.jumpFrameCount} skip frames mapped</p>
+                    )}
+                  </CardContent>
+                  <CardFooter>
+                    <Button asChild className="w-full opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Link href={`/player/${media.id}`}>Play</Link>
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Authenticated Mode ────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
       <div>

@@ -78,12 +78,17 @@ export default function AuthPage() {
           login(data.user, data.token);
           setLocation(data.user.role === "admin" ? "/admin" : "/dashboard");
         },
-        onError: () => {
-          toast({
-            title: "Registration failed",
-            description: "Could not create account.",
-            variant: "destructive",
-          });
+        onError: async (err: any) => {
+          let description = "Could not create account.";
+          try {
+            const body = await err?.response?.json?.() ?? {};
+            if (body?.error === "ADMIN_LIMIT_REACHED") {
+              description = body.message ?? "Maximum 2 administrator accounts allowed. Contact the manufacturer for review.";
+            } else if (body?.error === "Email already registered") {
+              description = "An account with this email already exists.";
+            }
+          } catch {}
+          toast({ title: "Registration failed", description, variant: "destructive" });
         },
       }
     );

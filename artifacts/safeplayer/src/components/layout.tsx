@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
-import { Shield, Home, Settings, LayoutDashboard, LogOut } from "lucide-react";
+import { Shield, Home, Settings, LayoutDashboard, LogOut, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLogout } from "@workspace/api-client-react";
 
@@ -19,9 +19,34 @@ export function Layout({ children }: { children: ReactNode }) {
     });
   };
 
-  if (!user) return <>{children}</>;
+  // Guest layout — minimal top bar with sign-in / register links
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
+        <header className="border-b border-border bg-card px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+          <Link href="/" className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-primary" />
+            <span className="font-bold tracking-tight text-sm">SafePlayer</span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" asChild className="gap-1.5">
+              <Link href="/"><LogIn className="h-4 w-4" /> Sign In</Link>
+            </Button>
+            <Button size="sm" asChild className="gap-1.5">
+              <Link href="/?tab=register"><UserPlus className="h-4 w-4" /> Register</Link>
+            </Button>
+          </div>
+        </header>
+        <main className="flex-1 overflow-auto bg-background">
+          <div className="p-4 md:p-8 max-w-7xl mx-auto">
+            {children}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
-  const navItems = user.role === "admin" 
+  const navItems = user.role === "admin"
     ? [
         { label: "Admin", href: "/admin", icon: LayoutDashboard },
         { label: "Library", href: "/dashboard", icon: Home },

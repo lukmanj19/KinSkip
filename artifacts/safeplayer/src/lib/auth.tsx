@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { User } from "@workspace/api-client-react";
 
 const TOKEN_KEY = "safeplayer_token";
+export const LAST_ADMIN_KEY = "safeplayer_last_admin";
 
 interface AuthContextType {
   user: User | null;
@@ -14,9 +15,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Restore token from localStorage on module load so the getter
+// Restore token from sessionStorage on module load so the getter
 // is ready before the first React Query fetch fires.
-const storedToken = localStorage.getItem(TOKEN_KEY);
+// sessionStorage is cleared when the browser tab/window is closed,
+// which enforces the "log out on close" requirement.
+const storedToken = sessionStorage.getItem(TOKEN_KEY);
 if (storedToken) {
   setAuthTokenGetter(() => storedToken);
 }
@@ -27,21 +30,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Keep the token getter in sync whenever the component mounts.
   useEffect(() => {
-    const t = localStorage.getItem(TOKEN_KEY);
+    const t = sessionStorage.getItem(TOKEN_KEY);
     if (t) setAuthTokenGetter(() => t);
   }, []);
 
   function login(userData: User, token: string) {
-    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(TOKEN_KEY, token);
     setAuthTokenGetter(() => token);
     queryClient.setQueryData(getGetMeQueryKey(), userData);
+    // Persist last admin id in localStorage so guest mode can show safe content
+    if (userData.role === "admin") {
+      localStorage.setItem(LAST_ADMIN_KEY, String(userData.id));
+    }
   }
 
   function logout() {
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     setAuthTokenGetter(null);
     queryClient.setQueryData(getGetMeQueryKey(), null);
     queryClient.clear();
+    // lastAdminId stays in localStorage intentionally — guest mode needs it
   }
 
   return (

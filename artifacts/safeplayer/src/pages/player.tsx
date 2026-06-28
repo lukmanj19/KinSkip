@@ -82,8 +82,8 @@ export default function Player() {
     e.target.value = "";
   }, [mediaId]);
 
-  const { data: mediaDetail, isLoading: isMediaLoading } = useGetMedia(mediaId, {
-    query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId) }
+  const { data: mediaDetail, isLoading: isMediaLoading, isError: isMediaError } = useGetMedia(mediaId, {
+    query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId), retry: false }
   });
 
   const { data: jumpFrames } = useListJumpFrames(
@@ -138,6 +138,28 @@ export default function Player() {
   if (!match) return null;
   if (isMediaLoading)
     return <div className="space-y-4"><Skeleton className="h-12 w-full" /><Skeleton className="h-[60vh] w-full" /></div>;
+
+  // Guest mode: API returned 403 (non-safe) or 404
+  if (isMediaError && !user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-4 max-w-md mx-auto">
+        <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+          <ShieldAlert className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-2xl font-bold">Content Restricted</h2>
+        <p className="text-muted-foreground">
+          This content has not been approved for unrestricted viewing. An administrator must mark it as safe before guests can watch it.
+        </p>
+        <div className="flex gap-3 pt-2">
+          <Button variant="outline" onClick={() => window.history.back()}>Go Back</Button>
+          <Button asChild>
+            <a href="/">Sign In</a>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!mediaDetail) return <div>Media not found</div>;
 
   const { media, safetyStatus } = mediaDetail;
