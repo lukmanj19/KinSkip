@@ -1,6 +1,7 @@
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
-import { useSetPin } from "@workspace/api-client-react";
+import { useSetPin, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +10,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 
 export default function Settings() {
-  const { user, login } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [pin, setPin] = useState("");
   const setPinMutation = useSetPin();
 
@@ -26,7 +28,7 @@ export default function Settings() {
           toast({ title: "Admin PIN updated successfully" });
           setPin("");
           if (user) {
-            login({ ...user, hasPin: true });
+            queryClient.setQueryData(getGetMeQueryKey(), { ...user, hasPin: true });
           }
         },
         onError: () => {

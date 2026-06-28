@@ -1,5 +1,5 @@
 import { useAuth } from "@/lib/auth";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { getBlobUrl, storeBlobUrl } from "@/lib/mediaStore";
 import { useRoute } from "wouter";
 import {
@@ -8,7 +8,7 @@ import {
   useVerifyPin
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag, FolderOpen } from "lucide-react";
+import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag, FolderOpen, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -86,10 +86,27 @@ export default function Player() {
     query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId), retry: false }
   });
 
-  const { data: jumpFrames } = useListJumpFrames(
+  const { data: jumpFrames, isLoading: isJumpFramesLoading } = useListJumpFrames(
     { mediaId },
     { query: { enabled: !!mediaId, queryKey: getListJumpFramesQueryKey({ mediaId }) } }
   );
+
+  const PREVIEW_LIMIT_SECS = 35;
+  const isViewerRestricted = !user || user.role !== "admin";
+  const hasNoJumpFrames = !isJumpFramesLoading && (jumpFrames ?? []).length === 0;
+  const [showPreviewRequired, setShowPreviewRequired] = useState(false);
+
+  // Reset preview-required overlay whenever the media changes
+  useEffect(() => { setShowPreviewRequired(false); }, [mediaId]);
+
+  // Enforce 35-second cap for non-admins on unreviewed content
+  useEffect(() => {
+    if (!isViewerRestricted || !hasNoJumpFrames || showPreviewRequired) return;
+    if (playerCurrentTime >= PREVIEW_LIMIT_SECS) {
+      videoRef.current?.pause();
+      setShowPreviewRequired(true);
+    }
+  }, [playerCurrentTime, isViewerRestricted, hasNoJumpFrames, showPreviewRequired]);
 
   const handleVerifyPin = () => {
     verifyPinMutation.mutate(
@@ -222,6 +239,31 @@ export default function Player() {
             onLocalFileLoaded={(name) => setLocalFileName(name)}
             suppressFilePickerOnPlay={media.type === "file"}
           />
+        )}
+
+        {/* 35-second preview cap overlay for non-admin on unreviewed content */}
+        {showPreviewRequired && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm text-white text-center p-6 gap-5">
+            <div className="h-16 w-16 rounded-full bg-warning/20 flex items-center justify-center">
+              <Clock className="w-8 h-8 text-warning" />
+            </div>
+            <div className="space-y-2 max-w-xs">
+              <h3 className="text-xl font-bold">Preview Limit Reached</h3>
+              <p className="text-sm text-white/75 leading-relaxed">
+                This video hasn't been reviewed by an administrator yet. Contact your admin to preview and approve this content so you can watch the full video.
+              </p>
+            </div>
+            <div className="flex gap-3 flex-wrap justify-center">
+              <Button variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={() => window.history.back()}>
+                Go Back
+              </Button>
+              {!user && (
+                <Button asChild>
+                  <a href="/">Sign In</a>
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

@@ -21,17 +21,17 @@ export default function AdminDashboardPage() {
   const [newPassword, setNewPassword] = useState("");
   const [isResetting, setIsResetting] = useState(false);
 
-  if (!user || user.role !== "admin") {
-    return <Redirect to="/dashboard" />;
-  }
-
+  // All hooks must be called unconditionally before any early return
   const { data: stats } = useGetAdminDashboard();
   const { data: users } = useListUsers();
   const { data: submissions } = useListSubmissions({ status: "pending" });
   const { data: flagged } = useListFlaggedContent();
-
   const approveMutation = useApproveSubmission();
   const rejectMutation = useRejectSubmission();
+
+  if (!user || user.role !== "admin") {
+    return <Redirect to="/dashboard" />;
+  }
 
   async function handleResetPassword() {
     if (!resetTarget || newPassword.length < 8) return;
@@ -59,7 +59,7 @@ export default function AdminDashboardPage() {
 
   const handleApprove = (id: number) => {
     approveMutation.mutate(
-      { submissionId: id },
+      { id },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListSubmissionsQueryKey({ status: "pending" }) });
@@ -71,7 +71,7 @@ export default function AdminDashboardPage() {
 
   const handleReject = (id: number) => {
     rejectMutation.mutate(
-      { submissionId: id },
+      { id },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListSubmissionsQueryKey({ status: "pending" }) });

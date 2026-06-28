@@ -113,8 +113,9 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     const [isFetching, setIsFetching] = useState(false);
 
     const effectiveSrc = localSrc ?? src;
-    // Only apply DB jump frames when playing the DB-backed source; clear them for locally-opened files
-    const effectiveJumpFrames = localSrc ? [] : jumpFrames;
+    // Always apply jump frames — the parent page controls which frames are relevant
+    // Filtering must apply even when a local file is re-selected or reopened
+    const effectiveJumpFrames = jumpFrames;
 
     // Sync forwarded ref
     useEffect(() => {

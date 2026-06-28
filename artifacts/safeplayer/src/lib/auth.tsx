@@ -26,7 +26,7 @@ if (storedToken) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { data: user, isLoading } = useGetMe({ query: { retry: false } });
+  const { data: user, isLoading } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
 
   // Keep the token getter in sync whenever the component mounts.
   useEffect(() => {

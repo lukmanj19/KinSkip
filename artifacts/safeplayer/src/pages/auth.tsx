@@ -103,6 +103,13 @@ export default function AuthPage() {
           </div>
           <h1 className="text-3xl font-bold tracking-tight">SafePlayer</h1>
           <p className="text-muted-foreground">Vigilant co-pilot for family media</p>
+          <a
+            href="/dashboard"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mt-1"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Browse without signing in
+          </a>
         </div>
 
         <Tabs defaultValue="login" className="w-full">
