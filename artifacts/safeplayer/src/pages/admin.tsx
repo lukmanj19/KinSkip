@@ -1,19 +1,25 @@
 import { useAuth } from "@/lib/auth";
 import { Redirect } from "wouter";
+import { useState } from "react";
 import { useGetAdminDashboard, getGetAdminDashboardQueryKey, useListUsers, useListSubmissions, useListFlaggedContent, useApproveSubmission, useRejectSubmission, getListSubmissionsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Film, Flag, CheckCircle2, XCircle, AlertTriangle, Activity } from "lucide-react";
+import { Users, Film, Flag, CheckCircle2, XCircle, AlertTriangle, Activity, KeyRound } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AdminDashboardPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [resetTarget, setResetTarget] = useState<{ id: number; email: string } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [isResetting, setIsResetting] = useState(false);
 
   if (!user || user.role !== "admin") {
     return <Redirect to="/dashboard" />;
@@ -26,6 +32,30 @@ export default function AdminDashboardPage() {
 
   const approveMutation = useApproveSubmission();
   const rejectMutation = useRejectSubmission();
+
+  async function handleResetPassword() {
+    if (!resetTarget || newPassword.length < 8) return;
+    setIsResetting(true);
+    try {
+      const res = await fetch(`/api/admin/users/${resetTarget.id}/reset-password`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ newPassword }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error ?? "Failed");
+      }
+      toast({ title: `Password reset for ${resetTarget.email}` });
+      setResetTarget(null);
+      setNewPassword("");
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : "Reset failed", variant: "destructive" });
+    } finally {
+      setIsResetting(false);
+    }
+  }
 
   const handleApprove = (id: number) => {
     approveMutation.mutate(
@@ -175,6 +205,7 @@ export default function AdminDashboardPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Tier</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -190,12 +221,50 @@ export default function AdminDashboardPage() {
                           <Badge variant="secondary">Free</Badge>
                         )}
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => { setResetTarget({ id: u.id, email: u.email }); setNewPassword(""); }}
+                        >
+                          <KeyRound className="w-3.5 h-3.5" /> Reset Password
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
+
+          {/* Reset Password Dialog */}
+          <Dialog open={!!resetTarget} onOpenChange={(open) => { if (!open) { setResetTarget(null); setNewPassword(""); } }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reset Password</DialogTitle>
+                <DialogDescription>
+                  Set a new password for <strong>{resetTarget?.email}</strong>. The user must log in with this password.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <Input
+                  type="password"
+                  placeholder="New password (min 8 characters)"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleResetPassword()}
+                />
+                <Button
+                  onClick={handleResetPassword}
+                  disabled={isResetting || newPassword.length < 8}
+                  className="w-full"
+                >
+                  {isResetting ? "Resetting…" : "Set New Password"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="flagged" className="mt-4">

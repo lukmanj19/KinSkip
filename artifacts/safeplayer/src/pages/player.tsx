@@ -1,6 +1,6 @@
 import { useAuth } from "@/lib/auth";
 import { useState, useRef, useCallback } from "react";
-import { getBlobUrl } from "@/lib/mediaStore";
+import { getBlobUrl, storeBlobUrl } from "@/lib/mediaStore";
 import { useRoute } from "wouter";
 import {
   useGetMedia, getGetMediaQueryKey,
@@ -8,7 +8,7 @@ import {
   useVerifyPin
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag } from "lucide-react";
+import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -39,11 +39,14 @@ export default function Player() {
   const mediaId = Number(params?.id);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const reloadFileRef = useRef<HTMLInputElement>(null);
   const [unfilteredToken, setUnfilteredToken] = useState<string | null>(null);
   const [isPinDialogOpen, setIsPinDialogOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
+  const [localFileName, setLocalFileName] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const verifyPinMutation = useVerifyPin();
   const createJumpFrameMutation = useCreateJumpFrame();
   const deleteJumpFrameMutation = useDeleteJumpFrame();
@@ -69,6 +72,15 @@ export default function Player() {
       }
     );
   }, [deleteJumpFrameMutation, queryClient, mediaId, toast]);
+
+  const handleReloadFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !mediaId) return;
+    storeBlobUrl(mediaId, file);
+    setLocalFileName(null);
+    setReloadKey((k) => k + 1);
+    e.target.value = "";
+  }, [mediaId]);
 
   const { data: mediaDetail, isLoading: isMediaLoading } = useGetMedia(mediaId, {
     query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId) }
@@ -129,7 +141,10 @@ export default function Player() {
   if (!mediaDetail) return <div>Media not found</div>;
 
   const { media, safetyStatus } = mediaDetail;
+  // reloadKey forces re-evaluation of getBlobUrl after the user re-selects a lost file
+  void reloadKey;
   const videoSrc = media.type === "file" ? (getBlobUrl(media.id) ?? undefined) : (media.url ?? undefined);
+  const fileMissing = media.type === "file" && videoSrc === undefined && localFileName === null;
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
@@ -150,15 +165,42 @@ export default function Player() {
         </div>
       )}
 
+      {/* Hidden input for reloading a lost local file */}
+      <input
+        ref={reloadFileRef}
+        type="file"
+        accept="video/*,audio/*"
+        className="hidden"
+        onChange={handleReloadFile}
+      />
+
       {/* Custom Video Player */}
       <div className="rounded-xl overflow-hidden aspect-video border shadow-2xl bg-black relative">
-        <VideoPlayer
-          ref={videoRef}
-          src={videoSrc}
-          jumpFrames={jumpFrames ?? []}
-          filteredMode={!unfilteredToken}
-          onProgressUpdate={handleProgressUpdate}
-        />
+        {fileMissing ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-white/70 p-6 text-center">
+            <FolderOpen className="w-14 h-14 opacity-40" />
+            <div>
+              <p className="text-lg font-semibold text-white">File not available</p>
+              <p className="text-sm mt-1">This local file isn't in the current session. Re-select it to continue watching.</p>
+            </div>
+            <button
+              onClick={() => reloadFileRef.current?.click()}
+              className="mt-2 px-5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition"
+            >
+              Re-select file
+            </button>
+          </div>
+        ) : (
+          <VideoPlayer
+            ref={videoRef}
+            src={videoSrc}
+            jumpFrames={jumpFrames ?? []}
+            filteredMode={!unfilteredToken}
+            onProgressUpdate={handleProgressUpdate}
+            onLocalFileLoaded={(name) => setLocalFileName(name)}
+            suppressFilePickerOnPlay={media.type === "file"}
+          />
+        )}
       </div>
 
       {/* Skip Frame Timeline — only shown when this media has frames */}
@@ -176,9 +218,9 @@ export default function Player() {
       {/* Media Info + Controls Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-card p-4 rounded-lg border">
         <div>
-          <h1 className="text-xl font-bold">{media.title}</h1>
+          <h1 className="text-xl font-bold">{localFileName ?? media.title}</h1>
           <p className="text-sm text-muted-foreground">
-            {media.type === "file" ? media.fileName : media.url}
+            {localFileName ?? (media.type === "file" ? media.fileName : media.url)}
           </p>
         </div>
 

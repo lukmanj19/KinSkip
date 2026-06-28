@@ -3,6 +3,7 @@ import { Redirect, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useState } from "react";
 import { useLogin, useRegister, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield } from "lucide-react";
+import { Shield, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const loginSchema = z.object({
@@ -31,6 +32,7 @@ export default function AuthPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [showForgot, setShowForgot] = useState(false);
 
   const loginMutation = useLogin();
   const registerMutation = useRegister();
@@ -142,8 +144,31 @@ export default function AuthPage() {
                     <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
                       {loginMutation.isPending ? "Signing in..." : "Sign in"}
                     </Button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgot(true)}
+                      className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors mt-1"
+                    >
+                      Forgot password?
+                    </button>
                   </form>
                 </Form>
+
+                {showForgot && (
+                  <div className="mt-4 rounded-lg border bg-muted/50 p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">Account recovery</p>
+                      <button onClick={() => setShowForgot(false)} className="text-muted-foreground hover:text-foreground">
+                        <ArrowLeft className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Password resets are managed by your family administrator. Ask them to open the{" "}
+                      <strong>Admin Dashboard → Users</strong> tab and use the{" "}
+                      <strong>Reset Password</strong> option next to your account.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

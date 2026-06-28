@@ -25,6 +25,8 @@ interface VideoPlayerProps {
   jumpFrames?: JumpFrame[];
   filteredMode?: boolean;
   onProgressUpdate?: (currentTime: number, duration: number) => void;
+  onLocalFileLoaded?: (fileName: string) => void;
+  suppressFilePickerOnPlay?: boolean;
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -71,7 +73,7 @@ function shortName(name: string, maxLen = 42): string {
 }
 
 export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
-  ({ src, jumpFrames = [], filteredMode = true, onProgressUpdate }, forwardedRef) => {
+  ({ src, jumpFrames = [], filteredMode = true, onProgressUpdate, onLocalFileLoaded, suppressFilePickerOnPlay }, forwardedRef) => {
     const { toast } = useToast();
     const internalRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -111,6 +113,8 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     const [isFetching, setIsFetching] = useState(false);
 
     const effectiveSrc = localSrc ?? src;
+    // Only apply DB jump frames when playing the DB-backed source; clear them for locally-opened files
+    const effectiveJumpFrames = localSrc ? [] : jumpFrames;
 
     // Sync forwarded ref
     useEffect(() => {
@@ -179,7 +183,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
       setCurrentTime(t);
       onProgressUpdate?.(t, vid.duration || 0);
       if (!filteredMode) return;
-      for (const frame of jumpFrames) {
+      for (const frame of effectiveJumpFrames) {
         if (t >= frame.startTime && t < frame.endTime) {
           vid.currentTime = frame.endTime;
           setSkipFlash(true);
@@ -188,7 +192,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
           break;
         }
       }
-    }, [jumpFrames, filteredMode, toast, onProgressUpdate]);
+    }, [effectiveJumpFrames, filteredMode, toast, onProgressUpdate]);
 
     // Seek bar pointer drag
     const handleProgressPointer = useCallback(
@@ -230,6 +234,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
       setTrackName(file.name);
       setPlaylistIdx(clampedIdx);
       setIsAudio(file.type.startsWith("audio/"));
+      onLocalFileLoaded?.(file.name);
       setTimeout(() => { internalRef.current?.play().catch(() => {}); }, 80);
     }
 
@@ -277,7 +282,10 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
 
     function togglePlay() {
       const vid = internalRef.current;
-      if (!effectiveSrc) { mediaFileRef.current?.click(); return; }
+      if (!effectiveSrc) {
+        if (!suppressFilePickerOnPlay) mediaFileRef.current?.click();
+        return;
+      }
       if (!vid) return;
       if (vid.paused) vid.play();
       else vid.pause();
@@ -511,7 +519,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
               onPointerUp={handleProgressUp}
             >
               <div className="absolute inset-y-1/2 -translate-y-1/2 w-full h-1 group-hover:h-1.5 rounded-full bg-white/20 transition-all duration-150" />
-              {jumpFrames.map((f) => {
+              {effectiveJumpFrames.map((f) => {
                 if (!duration) return null;
                 const left = (f.startTime / duration) * 100;
                 const width = ((f.endTime - f.startTime) / duration) * 100;

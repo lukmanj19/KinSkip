@@ -2,6 +2,7 @@ import { Router } from "express";
 import { eq, count } from "drizzle-orm";
 import { db, usersTable, mediaTable, submissionsTable, flaggedContentTable, activityTable } from "@workspace/db";
 import { UpdateUserRoleParams, UpdateUserRoleBody } from "@workspace/api-zod";
+import bcrypt from "bcryptjs";
 
 const router = Router();
 
@@ -104,6 +105,38 @@ router.patch("/admin/users/:id/role", async (req, res): Promise<void> => {
     hasPin: !!user.pinHash,
     createdAt: user.createdAt.toISOString(),
   });
+});
+
+// PATCH /admin/users/:id/reset-password
+router.patch("/admin/users/:id/reset-password", async (req, res): Promise<void> => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const targetId = Number(req.params.id);
+  const { newPassword } = req.body as { newPassword?: string };
+
+  if (!targetId || isNaN(targetId)) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+  if (!newPassword || newPassword.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+
+  const hash = await bcrypt.hash(newPassword, 10);
+  const [updated] = await db
+    .update(usersTable)
+    .set({ passwordHash: hash })
+    .where(eq(usersTable.id, targetId))
+    .returning({ id: usersTable.id, email: usersTable.email });
+
+  if (!updated) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  res.json({ success: true, email: updated.email });
 });
 
 // GET /admin/flagged
