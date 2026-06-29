@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { storeBlobUrl, getBlobUrl } from "@/lib/mediaStore";
+import { cacheFile, removeCachedFile } from "@/lib/fileCache";
 
 // Re-use in both authenticated and guest sections
 const StatusBadge = ({ status }: { status: string }) => {
@@ -109,6 +110,7 @@ export default function Dashboard() {
       {
         onSuccess: (newMedia) => {
           storeBlobUrl(newMedia.id, capturedFile);
+          cacheFile(newMedia.id, capturedFile); // persist across sessions
           queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
           navigate(`/player/${newMedia.id}?autoplay=1`);
         },
@@ -150,6 +152,7 @@ export default function Dashboard() {
         return;
       }
       storeBlobUrl(id, file);
+      cacheFile(id, file); // persist so it's available in future sessions too
       navigate(`/player/${id}?autoplay=1`);
     },
     [navigate, toast]
@@ -161,7 +164,10 @@ export default function Dashboard() {
       hideMediaMutation.mutate(
         { id },
         {
-          onSuccess: () => queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() }),
+          onSuccess: () => {
+            removeCachedFile(id); // free up IndexedDB space
+            queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
+          },
           onError: () => toast({ title: "Failed to remove", variant: "destructive" }),
         }
       );

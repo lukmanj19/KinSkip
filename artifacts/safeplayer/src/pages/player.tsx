@@ -1,6 +1,7 @@
 import { useAuth } from "@/lib/auth";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { getBlobUrl, storeBlobUrl } from "@/lib/mediaStore";
+import { getCachedFile } from "@/lib/fileCache";
 import { useRoute } from "wouter";
 import {
   useGetMedia, getGetMediaQueryKey,
@@ -53,6 +54,8 @@ export default function Player() {
   const [localFileName, setLocalFileName] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const hasAutoPlayedRef = useRef(false);
+  // true while we're checking IndexedDB so we don't flash "file not available"
+  const [checkingCache, setCheckingCache] = useState(true);
 
   const verifyPinMutation = useVerifyPin();
   const createJumpFrameMutation = useCreateJumpFrame();
@@ -128,6 +131,33 @@ export default function Player() {
       setShowPreviewRequired(true);
     }
   }, [playerCurrentTime, isViewerRestricted, hasNoJumpFrames, showPreviewRequired]);
+
+  // On mount: silently restore file from IndexedDB if it's not in the current session blob store.
+  // This prevents the "file not available" screen for files the user has previously watched.
+  useEffect(() => {
+    if (!mediaDetail || mediaDetail.media.type !== "file") {
+      setCheckingCache(false);
+      return;
+    }
+    // Already have a blob URL from this session — nothing to restore
+    if (getBlobUrl(mediaId)) {
+      setCheckingCache(false);
+      return;
+    }
+    let cancelled = false;
+    getCachedFile(mediaId).then((cachedFile) => {
+      if (cancelled) return;
+      if (cachedFile) {
+        storeBlobUrl(mediaId, cachedFile);
+        // Trigger a re-render so VideoPlayer picks up the new blob URL
+        setReloadKey((k) => k + 1);
+        // Also auto-play after restoration
+        hasAutoPlayedRef.current = false;
+      }
+      setCheckingCache(false);
+    });
+    return () => { cancelled = true; };
+  }, [mediaId, mediaDetail]);
 
   // Auto-play when navigated from dashboard with ?autoplay=1
   useEffect(() => {
@@ -224,7 +254,8 @@ export default function Player() {
   const { media, safetyStatus } = mediaDetail;
   void reloadKey;
   const videoSrc = media.type === "file" ? (getBlobUrl(media.id) ?? undefined) : (media.url ?? undefined);
-  const fileMissing = media.type === "file" && videoSrc === undefined && localFileName === null;
+  // Don't show "file not available" until IndexedDB restore attempt is complete
+  const fileMissing = !checkingCache && media.type === "file" && videoSrc === undefined && localFileName === null;
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
