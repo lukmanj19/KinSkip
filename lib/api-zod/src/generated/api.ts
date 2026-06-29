@@ -180,6 +180,14 @@ export const DeleteMediaParams = zod.object({
 
 
 /**
+ * @summary Soft-delete a media entry from the library (preserves jump frame memory)
+ */
+export const HideMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary Update safety status of a media entry (admin only)
  */
 export const UpdateMediaSafetyParams = zod.object({

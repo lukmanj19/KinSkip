@@ -206,6 +206,23 @@ paths:
         "204":
           description: Deleted
 
+  /media/{id}/hide:
+    patch:
+      operationId: hideMedia
+      tags: [media]
+      summary: Soft-delete a media entry from the library (preserves jump frame memory)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Hidden
+        "404":
+          description: Not found
+
   /media/{id}/safety:
     patch:
       operationId: updateMediaSafety

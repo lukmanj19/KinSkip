@@ -1,42 +1,65 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
 import { LAST_ADMIN_KEY } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useListMedia, useCreateMedia, useUpdateMediaSafety, getListMediaQueryKey } from "@workspace/api-client-react";
+import {
+  useListMedia, useCreateMedia, useUpdateMediaSafety, useHideMedia,
+  getListMediaQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon, AlertTriangle, LogIn, CheckCircle2 } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import {
+  ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon,
+  AlertTriangle, LogIn, CheckCircle2, X,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { storeBlobUrl } from "@/lib/mediaStore";
+import { storeBlobUrl, getBlobUrl } from "@/lib/mediaStore";
+
+// Re-use in both authenticated and guest sections
+const StatusBadge = ({ status }: { status: string }) => {
+  if (status === "safe")
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-safe/10 text-safe border border-safe/20">
+        <ShieldCheck className="w-3.5 h-3.5" /> Safe
+      </div>
+    );
+  if (status === "flagged")
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-danger/10 text-danger border border-danger/20">
+        <ShieldAlert className="w-3.5 h-3.5" /> Flagged
+      </div>
+    );
+  return (
+    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-warning/10 text-warning border border-warning/20">
+      <AlertTriangle className="w-3.5 h-3.5" /> Un-Previewed
+    </div>
+  );
+};
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: mediaItems, isLoading } = useListMedia({ query: { enabled: !!user, queryKey: getListMediaQueryKey() } });
+  const [, navigate] = useLocation();
+
+  const { data: mediaItems, isLoading } = useListMedia({
+    query: { enabled: !!user, queryKey: getListMediaQueryKey() },
+  });
 
   const createMediaMutation = useCreateMedia();
   const updateSafetyMutation = useUpdateMediaSafety();
-
-  const handleMarkSafe = (id: number) => {
-    updateSafetyMutation.mutate(
-      { id, data: { safetyStatus: "safe" } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
-          toast({ title: "Marked as reviewed", description: "This content is now approved for family viewing." });
-        },
-        onError: () => toast({ title: "Failed to update", variant: "destructive" }),
-      }
-    );
-  };
+  const hideMediaMutation = useHideMedia();
 
   const [urlInput, setUrlInput] = useState("");
   const [guestMedia, setGuestMedia] = useState<any[]>([]);
   const [guestLoading, setGuestLoading] = useState(false);
+
+  // Ref for the "re-select to play" hidden file picker
+  const reSelectInputRef = useRef<HTMLInputElement>(null);
+  const pendingPlayMedia = useRef<{ id: number; fileHash: string | null } | null>(null);
 
   const lastAdminId = !user ? localStorage.getItem(LAST_ADMIN_KEY) : null;
 
@@ -54,18 +77,16 @@ export default function Dashboard() {
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!urlInput.trim()) return;
-
     createMediaMutation.mutate(
-      { data: { type: "url", url: urlInput, title: urlInput.split('/').pop() || "Video" } },
+      { data: { type: "url", url: urlInput, title: urlInput.split("/").pop() || "Video" } },
       {
-        onSuccess: () => {
+        onSuccess: (newMedia) => {
           setUrlInput("");
           queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
-          toast({ title: "Media added" });
+          toast({ title: "Stream added" });
+          navigate(`/player/${newMedia.id}?autoplay=1`);
         },
-        onError: () => {
-          toast({ title: "Failed to add media", variant: "destructive" });
-        }
+        onError: () => toast({ title: "Failed to add media", variant: "destructive" }),
       }
     );
   };
@@ -73,51 +94,95 @@ export default function Dashboard() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const capturedFile = file;
     const fileHash = `${file.size}-${file.name}`;
-
     createMediaMutation.mutate(
-      { data: { type: "file", fileName: file.name, fileHash, title: file.name.replace(/\.[^/.]+$/, ""), mimeType: file.type } },
+      {
+        data: {
+          type: "file",
+          fileName: file.name,
+          fileHash,
+          title: file.name.replace(/\.[^/.]+$/, ""),
+          mimeType: file.type,
+        },
+      },
       {
         onSuccess: (newMedia) => {
           storeBlobUrl(newMedia.id, capturedFile);
           queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
-          toast({ title: "File ready", description: "Click Play to start with SafeMode." });
+          navigate(`/player/${newMedia.id}?autoplay=1`);
         },
-        onError: () => {
-          toast({ title: "Failed to process file", variant: "destructive" });
+        onError: () => toast({ title: "Failed to process file", variant: "destructive" }),
+      }
+    );
+    e.target.value = "";
+  };
+
+  // "Play" on a local file card: use existing blob if available, otherwise open file picker
+  const handlePlayLocalFile = useCallback(
+    (mediaId: number, fileHash: string | null) => {
+      if (getBlobUrl(mediaId)) {
+        navigate(`/player/${mediaId}?autoplay=1`);
+        return;
+      }
+      // No blob URL in this session — ask user to re-select the file
+      pendingPlayMedia.current = { id: mediaId, fileHash };
+      reSelectInputRef.current?.click();
+    },
+    [navigate]
+  );
+
+  // Handle file re-selection from the hidden input
+  const handleReSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !pendingPlayMedia.current) return;
+      const { id, fileHash } = pendingPlayMedia.current;
+      pendingPlayMedia.current = null;
+      const selectedHash = `${file.size}-${file.name}`;
+      if (fileHash && selectedHash !== fileHash) {
+        toast({
+          title: "Wrong file",
+          description: "The selected file doesn't match this library entry. Please select the original file.",
+          variant: "destructive",
+        });
+        return;
+      }
+      storeBlobUrl(id, file);
+      navigate(`/player/${id}?autoplay=1`);
+    },
+    [navigate, toast]
+  );
+
+  // Soft-delete: removes from library list but keeps jump frame memory
+  const handleClear = useCallback(
+    (id: number) => {
+      hideMediaMutation.mutate(
+        { id },
+        {
+          onSuccess: () => queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() }),
+          onError: () => toast({ title: "Failed to remove", variant: "destructive" }),
         }
+      );
+    },
+    [hideMediaMutation, queryClient, toast]
+  );
+
+  const handleMarkSafe = (id: number) => {
+    updateSafetyMutation.mutate(
+      { id, data: { safetyStatus: "safe" } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
+          toast({ title: "Marked safe", description: "This content is now approved for family viewing." });
+        },
+        onError: () => toast({ title: "Failed to update", variant: "destructive" }),
       }
     );
   };
 
-  const StatusBadge = ({ status }: { status: string }) => {
-    if (status === "safe") {
-      return (
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-safe/10 text-safe border border-safe/20">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          Safe Mode
-        </div>
-      );
-    }
-    if (status === "flagged") {
-      return (
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-danger/10 text-danger border border-danger/20">
-          <ShieldAlert className="w-3.5 h-3.5" />
-          Flagged
-        </div>
-      );
-    }
-    return (
-      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-warning/10 text-warning border border-warning/20">
-        <AlertTriangle className="w-3.5 h-3.5" />
-        Un-Previewed
-      </div>
-    );
-  };
-
-  // ── Guest Mode ────────────────────────────────────────────────────────────
+  // ── Guest Mode ──────────────────────────────────────────────────────────────
   if (!user) {
     return (
       <div className="space-y-8">
@@ -140,19 +205,27 @@ export default function Dashboard() {
               </p>
             </div>
             <Button asChild className="gap-2">
-              <Link href="/"><LogIn className="w-4 h-4" /> Sign In</Link>
+              <Link href="/">
+                <LogIn className="w-4 h-4" /> Sign In
+              </Link>
             </Button>
           </div>
         ) : guestLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 w-full" />)}
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
           </div>
         ) : guestMedia.length === 0 ? (
           <div className="text-center py-12 border border-dashed rounded-lg space-y-3">
             <ShieldCheck className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-            <p className="text-sm text-muted-foreground">No approved content yet. Ask your administrator to approve media for family viewing.</p>
+            <p className="text-sm text-muted-foreground">
+              No approved content yet. Ask your administrator to approve media for family viewing.
+            </p>
             <Button variant="outline" size="sm" asChild className="gap-1.5">
-              <Link href="/"><LogIn className="w-4 h-4" /> Sign In</Link>
+              <Link href="/">
+                <LogIn className="w-4 h-4" /> Sign In
+              </Link>
             </Button>
           </div>
         ) : (
@@ -163,14 +236,20 @@ export default function Dashboard() {
                 <Card key={media.id} className="hover-elevate transition-colors group">
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
-                      <CardTitle className="text-base truncate pr-4" title={media.title}>{media.title}</CardTitle>
+                      <CardTitle className="text-base truncate pr-4" title={media.title}>
+                        {media.title}
+                      </CardTitle>
                       <StatusBadge status={media.safetyStatus} />
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-muted-foreground truncate">{media.type === 'file' ? media.fileName : media.url}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {media.type === "file" ? media.fileName : media.url}
+                    </p>
                     {media.jumpFrameCount !== undefined && (
-                      <p className="text-xs text-muted-foreground mt-2">{media.jumpFrameCount} skip frames mapped</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {media.jumpFrameCount} skip frame{media.jumpFrameCount !== 1 ? "s" : ""} mapped
+                      </p>
                     )}
                   </CardContent>
                   <CardFooter>
@@ -187,9 +266,18 @@ export default function Dashboard() {
     );
   }
 
-  // ── Authenticated Mode ────────────────────────────────────────────────────
+  // ── Authenticated Mode ──────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
+      {/* Hidden file input for re-selecting a lost local file to play */}
+      <input
+        ref={reSelectInputRef}
+        type="file"
+        accept="video/*,audio/*"
+        className="hidden"
+        onChange={handleReSelect}
+      />
+
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Library</h1>
         <p className="text-muted-foreground mt-1">Select media to play with SafeMode.</p>
@@ -204,9 +292,16 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">Play a video file from your device. The file never leaves your computer.</p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Play a video file from your device. The file never leaves your computer.
+            </p>
             <div className="relative">
-              <Input type="file" accept="video/*" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              <Input
+                type="file"
+                accept="video/*"
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
               <Button variant="outline" className="w-full gap-2 pointer-events-none">
                 <Plus className="w-4 h-4" /> Select File
               </Button>
@@ -225,8 +320,14 @@ export default function Dashboard() {
             <form onSubmit={handleUrlSubmit} className="space-y-4">
               <p className="text-sm text-muted-foreground">Load a video from a direct URL (.mp4, .m3u8).</p>
               <div className="flex gap-2">
-                <Input placeholder="https://..." value={urlInput} onChange={(e) => setUrlInput(e.target.value)} />
-                <Button type="submit" disabled={createMediaMutation.isPending}>Load</Button>
+                <Input
+                  placeholder="https://..."
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                />
+                <Button type="submit" disabled={createMediaMutation.isPending}>
+                  Load
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -237,7 +338,9 @@ export default function Dashboard() {
         <h2 className="text-xl font-semibold mb-4">Recent Media</h2>
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 w-full" />)}
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
           </div>
         ) : mediaItems?.length === 0 ? (
           <div className="text-center py-12 border border-dashed rounded-lg">
@@ -247,23 +350,52 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mediaItems?.map(media => {
+            {mediaItems?.map((media) => {
               const needsReview = media.safetyStatus !== "safe" && user?.role === "admin";
-              const isMarkingThis = updateSafetyMutation.isPending && updateSafetyMutation.variables?.id === media.id;
+              const isMarkingThis =
+                updateSafetyMutation.isPending && updateSafetyMutation.variables?.id === media.id;
+              const isClearingThis =
+                hideMediaMutation.isPending && hideMediaMutation.variables?.id === media.id;
+              const isLocalFile = media.type === "file";
+              const hasBlob = isLocalFile && !!getBlobUrl(media.id);
+
               return (
-                <Card key={media.id} className="hover-elevate transition-colors group">
-                  <CardHeader className="pb-2">
+                <Card key={media.id} className="hover-elevate transition-colors group relative">
+                  {/* Clear button — always visible, top-right corner */}
+                  <button
+                    onClick={() => handleClear(media.id)}
+                    disabled={isClearingThis}
+                    title="Remove from library (jump frames are preserved)"
+                    className="absolute top-2 right-2 z-10 h-6 w-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+
+                  <CardHeader className="pb-2 pr-10">
                     <div className="flex justify-between items-start">
-                      <CardTitle className="text-base truncate pr-4" title={media.title}>{media.title}</CardTitle>
+                      <CardTitle className="text-base truncate pr-2" title={media.title}>
+                        {media.title}
+                      </CardTitle>
                       <StatusBadge status={media.safetyStatus} />
                     </div>
                   </CardHeader>
+
                   <CardContent>
-                    <p className="text-xs text-muted-foreground truncate">{media.type === 'file' ? media.fileName : media.url}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {isLocalFile ? media.fileName : media.url}
+                    </p>
                     {media.jumpFrameCount !== undefined && (
-                      <p className="text-xs text-muted-foreground mt-2">{media.jumpFrameCount} skip frame{media.jumpFrameCount !== 1 ? "s" : ""} mapped</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {media.jumpFrameCount} skip frame{media.jumpFrameCount !== 1 ? "s" : ""} mapped
+                      </p>
+                    )}
+                    {isLocalFile && !hasBlob && (
+                      <p className="text-xs text-warning mt-1.5">
+                        Re-select file to play
+                      </p>
                     )}
                   </CardContent>
+
                   <CardFooter className="flex gap-2">
                     {needsReview && (
                       <Button
@@ -277,9 +409,19 @@ export default function Dashboard() {
                         {isMarkingThis ? "Saving…" : "Mark Safe"}
                       </Button>
                     )}
-                    <Button asChild className="flex-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Link href={`/player/${media.id}`}>Play</Link>
-                    </Button>
+
+                    {isLocalFile ? (
+                      <Button
+                        className="flex-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => handlePlayLocalFile(media.id, media.fileHash ?? null)}
+                      >
+                        {hasBlob ? "Play" : "Select & Play"}
+                      </Button>
+                    ) : (
+                      <Button asChild className="flex-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Link href={`/player/${media.id}?autoplay=1`}>Play</Link>
+                      </Button>
+                    )}
                   </CardFooter>
                 </Card>
               );

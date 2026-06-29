@@ -5,14 +5,18 @@ import { useRoute } from "wouter";
 import {
   useGetMedia, getGetMediaQueryKey,
   useListJumpFrames, useCreateJumpFrame, useDeleteJumpFrame, getListJumpFramesQueryKey,
-  useVerifyPin
+  useVerifyPin,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag, FolderOpen, Clock } from "lucide-react";
+import {
+  ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag,
+  FolderOpen, Clock, X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
@@ -42,14 +46,22 @@ export default function Player() {
   const reloadFileRef = useRef<HTMLInputElement>(null);
   const [unfilteredToken, setUnfilteredToken] = useState<string | null>(null);
   const [isPinDialogOpen, setIsPinDialogOpen] = useState(false);
+  const [isSkipFrameDialogOpen, setIsSkipFrameDialogOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [localFileName, setLocalFileName] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const hasAutoPlayedRef = useRef(false);
+
   const verifyPinMutation = useVerifyPin();
   const createJumpFrameMutation = useCreateJumpFrame();
   const deleteJumpFrameMutation = useDeleteJumpFrame();
+
+  // Check for ?autoplay=1 in URL
+  const shouldAutoPlay = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).has("autoplay")
+    : false;
 
   const handleProgressUpdate = useCallback((t: number, d: number) => {
     setPlayerCurrentTime(t);
@@ -79,11 +91,13 @@ export default function Player() {
     storeBlobUrl(mediaId, file);
     setLocalFileName(null);
     setReloadKey((k) => k + 1);
+    // Also auto-play after reloading
+    hasAutoPlayedRef.current = false;
     e.target.value = "";
   }, [mediaId]);
 
   const { data: mediaDetail, isLoading: isMediaLoading, isError: isMediaError } = useGetMedia(mediaId, {
-    query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId), retry: false }
+    query: { enabled: !!mediaId, queryKey: getGetMediaQueryKey(mediaId), retry: false },
   });
 
   const { data: jumpFrames, isLoading: isJumpFramesLoading } = useListJumpFrames(
@@ -93,7 +107,14 @@ export default function Player() {
 
   const PREVIEW_LIMIT_SECS = 35;
   const isViewerRestricted = !user || user.role !== "admin";
-  const hasNoJumpFrames = !isJumpFramesLoading && (jumpFrames ?? []).length === 0;
+
+  // 35-second cap only applies to unreviewed content — "safe" items play fully
+  const safetyStatusFromDetail = mediaDetail?.safetyStatus;
+  const hasNoJumpFrames =
+    !isJumpFramesLoading &&
+    (jumpFrames ?? []).length === 0 &&
+    safetyStatusFromDetail !== "safe";
+
   const [showPreviewRequired, setShowPreviewRequired] = useState(false);
 
   // Reset preview-required overlay whenever the media changes
@@ -107,6 +128,23 @@ export default function Player() {
       setShowPreviewRequired(true);
     }
   }, [playerCurrentTime, isViewerRestricted, hasNoJumpFrames, showPreviewRequired]);
+
+  // Auto-play when navigated from dashboard with ?autoplay=1
+  useEffect(() => {
+    if (!shouldAutoPlay || hasAutoPlayedRef.current || !videoRef.current) return;
+    const vid = videoRef.current;
+    const tryPlay = () => {
+      if (hasAutoPlayedRef.current) return;
+      hasAutoPlayedRef.current = true;
+      vid.play().catch(() => {});
+    };
+    if (vid.readyState >= 3) {
+      tryPlay();
+    } else {
+      vid.addEventListener("canplay", tryPlay, { once: true });
+    }
+    return () => vid.removeEventListener("canplay", tryPlay);
+  }, [shouldAutoPlay, reloadKey]);
 
   const handleVerifyPin = () => {
     verifyPinMutation.mutate(
@@ -140,6 +178,7 @@ export default function Player() {
           queryClient.invalidateQueries({ queryKey: getListJumpFramesQueryKey({ mediaId }) });
           toast({ title: "Jump frame added" });
           jumpFrameForm.reset();
+          setIsSkipFrameDialogOpen(false);
         },
         onError: () => toast({ title: "Failed to add jump frame", variant: "destructive" }),
       }
@@ -154,7 +193,12 @@ export default function Player() {
 
   if (!match) return null;
   if (isMediaLoading)
-    return <div className="space-y-4"><Skeleton className="h-12 w-full" /><Skeleton className="h-[60vh] w-full" /></div>;
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-[60vh] w-full" />
+      </div>
+    );
 
   // Guest mode: API returned 403 (non-safe) or 404
   if (isMediaError && !user) {
@@ -169,9 +213,7 @@ export default function Player() {
         </p>
         <div className="flex gap-3 pt-2">
           <Button variant="outline" onClick={() => window.history.back()}>Go Back</Button>
-          <Button asChild>
-            <a href="/">Sign In</a>
-          </Button>
+          <Button asChild><a href="/">Sign In</a></Button>
         </div>
       </div>
     );
@@ -180,7 +222,6 @@ export default function Player() {
   if (!mediaDetail) return <div>Media not found</div>;
 
   const { media, safetyStatus } = mediaDetail;
-  // reloadKey forces re-evaluation of getBlobUrl after the user re-selects a lost file
   void reloadKey;
   const videoSrc = media.type === "file" ? (getBlobUrl(media.id) ?? undefined) : (media.url ?? undefined);
   const fileMissing = media.type === "file" && videoSrc === undefined && localFileName === null;
@@ -190,7 +231,7 @@ export default function Player() {
       {/* Status Banner */}
       {safetyStatus === "safe" && (
         <div className="bg-safe text-safe-foreground p-3 rounded-lg flex items-center justify-center gap-2 font-medium">
-          <ShieldCheck className="w-5 h-5" /> Safe Mode Active
+          <ShieldCheck className="w-5 h-5" /> Safe Mode Active — Previewed &amp; Approved
         </div>
       )}
       {safetyStatus === "unpreviewed" && (
@@ -213,20 +254,27 @@ export default function Player() {
         onChange={handleReloadFile}
       />
 
-      {/* Custom Video Player */}
+      {/* Video Player */}
       <div className="rounded-xl overflow-hidden aspect-video border shadow-2xl bg-black relative">
         {fileMissing ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-white/70 p-6 text-center">
             <FolderOpen className="w-14 h-14 opacity-40" />
             <div>
               <p className="text-lg font-semibold text-white">File not available</p>
-              <p className="text-sm mt-1">This local file isn't in the current session. Re-select it to continue watching.</p>
+              <p className="text-sm mt-1">
+                This local file isn't in the current session. Re-select it to continue watching.
+              </p>
+              {(jumpFrames ?? []).length > 0 && (
+                <p className="text-xs mt-2 text-green-400/80">
+                  ✓ {jumpFrames!.length} skip frame{jumpFrames!.length !== 1 ? "s" : ""} will be applied automatically.
+                </p>
+              )}
             </div>
             <button
               onClick={() => reloadFileRef.current?.click()}
               className="mt-2 px-5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition"
             >
-              Re-select file
+              Re-select file &amp; Play
             </button>
           </div>
         ) : (
@@ -254,7 +302,11 @@ export default function Player() {
               </p>
             </div>
             <div className="flex gap-3 flex-wrap justify-center">
-              <Button variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={() => window.history.back()}>
+              <Button
+                variant="outline"
+                className="border-white/30 text-white hover:bg-white/10"
+                onClick={() => window.history.back()}
+              >
                 Go Back
               </Button>
               {!user && (
@@ -267,7 +319,7 @@ export default function Player() {
         )}
       </div>
 
-      {/* Skip Frame Timeline — only shown when this media has frames */}
+      {/* Skip Frame Timeline */}
       {(jumpFrames ?? []).length > 0 && (
         <FrameTimeline
           jumpFrames={jumpFrames ?? []}
@@ -291,95 +343,119 @@ export default function Player() {
         <div className="flex items-center gap-3">
           {user?.role === "admin" && (
             <>
-              {/* Add Skip Frame Drawer */}
-              <Drawer>
-                <DrawerTrigger asChild>
+              {/* Add Skip Frame — Dialog overlay (keeps video playing) */}
+              <Dialog open={isSkipFrameDialogOpen} onOpenChange={setIsSkipFrameDialogOpen}>
+                <DialogTrigger asChild>
                   <Button variant="outline" className="gap-2">
                     <Flag className="w-4 h-4" /> Add Skip Frame
                   </Button>
-                </DrawerTrigger>
-                <DrawerContent>
-                  <div className="mx-auto w-full max-w-lg p-6">
-                    <DrawerHeader>
-                      <DrawerTitle>Add Skip Frame</DrawerTitle>
-                      <DrawerDescription>Mark a segment to be skipped during playback.</DrawerDescription>
-                    </DrawerHeader>
-                    <Form {...jumpFrameForm}>
-                      <form onSubmit={jumpFrameForm.handleSubmit(handleCreateJumpFrame)} className="space-y-5 mt-4">
-                        <div className="space-y-4">
-                          <FormField
-                            control={jumpFrameForm.control}
-                            name="startTime"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Start Time</FormLabel>
-                                <div className="flex items-end gap-3">
-                                  <FormControl>
-                                    <TimeInput value={field.value} onChange={field.onChange} />
-                                  </FormControl>
-                                  <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => handleGetCurrentTime("startTime")}>
-                                    Use Current
-                                  </Button>
-                                </div>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={jumpFrameForm.control}
-                            name="endTime"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>End Time</FormLabel>
-                                <div className="flex items-end gap-3">
-                                  <FormControl>
-                                    <TimeInput value={field.value} onChange={field.onChange} />
-                                  </FormControl>
-                                  <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => handleGetCurrentTime("endTime")}>
-                                    Use Current
-                                  </Button>
-                                </div>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  {/* Shadcn DialogContent renders an X close button automatically */}
+                  <DialogHeader>
+                    <DialogTitle>Add Skip Frame</DialogTitle>
+                    <DialogDescription>
+                      Mark a segment to be automatically skipped during playback. Video continues playing while you set the timestamps.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Form {...jumpFrameForm}>
+                    <form
+                      onSubmit={jumpFrameForm.handleSubmit(handleCreateJumpFrame)}
+                      className="space-y-5 mt-2"
+                    >
+                      <div className="space-y-4">
                         <FormField
                           control={jumpFrameForm.control}
-                          name="category"
+                          name="startTime"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Category</FormLabel>
-                              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormLabel>Start Time</FormLabel>
+                              <div className="flex items-end gap-3">
                                 <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select a category" />
-                                  </SelectTrigger>
+                                  <TimeInput value={field.value} onChange={field.onChange} />
                                 </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="violence">Violence</SelectItem>
-                                  <SelectItem value="sexual">Sexual</SelectItem>
-                                  <SelectItem value="language">Language</SelectItem>
-                                  <SelectItem value="other">Other</SelectItem>
-                                </SelectContent>
-                              </Select>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="mb-0.5 shrink-0"
+                                  onClick={() => handleGetCurrentTime("startTime")}
+                                >
+                                  Use Current
+                                </Button>
+                              </div>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
-                        <Button type="submit" className="w-full" disabled={createJumpFrameMutation.isPending}>
-                          Save Skip Frame
-                        </Button>
-                      </form>
-                    </Form>
-                  </div>
-                </DrawerContent>
-              </Drawer>
+                        <FormField
+                          control={jumpFrameForm.control}
+                          name="endTime"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>End Time</FormLabel>
+                              <div className="flex items-end gap-3">
+                                <FormControl>
+                                  <TimeInput value={field.value} onChange={field.onChange} />
+                                </FormControl>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="mb-0.5 shrink-0"
+                                  onClick={() => handleGetCurrentTime("endTime")}
+                                >
+                                  Use Current
+                                </Button>
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <FormField
+                        control={jumpFrameForm.control}
+                        name="category"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Category</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select a category" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="violence">Violence</SelectItem>
+                                <SelectItem value="sexual">Sexual</SelectItem>
+                                <SelectItem value="language">Language</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={createJumpFrameMutation.isPending}
+                      >
+                        Save Skip Frame
+                      </Button>
+                    </form>
+                  </Form>
+                </DialogContent>
+              </Dialog>
 
-              {/* Unfiltered Mode Toggle */}
+              {/* Unfiltered Mode — Dialog overlay (keeps video playing) */}
               {unfilteredToken ? (
-                <Button variant="outline" className="gap-2 text-warning border-warning hover:bg-warning/10" onClick={() => setUnfilteredToken(null)}>
-                  <Unlock className="w-4 h-4" /> Unfiltered Mode (Active)
+                <Button
+                  variant="outline"
+                  className="gap-2 text-warning border-warning hover:bg-warning/10"
+                  onClick={() => setUnfilteredToken(null)}
+                >
+                  <Unlock className="w-4 h-4" /> Unfiltered (Active)
                 </Button>
               ) : (
                 <Dialog open={isPinDialogOpen} onOpenChange={setIsPinDialogOpen}>
@@ -388,12 +464,14 @@ export default function Player() {
                       <Lock className="w-4 h-4" /> Unlock Unfiltered
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-w-sm">
                     <DialogHeader>
                       <DialogTitle>Unlock Unfiltered Mode</DialogTitle>
-                      <DialogDescription>Enter your admin PIN to disable skip frames.</DialogDescription>
+                      <DialogDescription>
+                        Enter your admin PIN to disable skip frames. Video continues playing.
+                      </DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-4 py-4">
+                    <div className="space-y-4 py-2">
                       <Input
                         type="password"
                         placeholder="Enter PIN"
@@ -401,8 +479,13 @@ export default function Player() {
                         onChange={(e) => setPin(e.target.value)}
                         maxLength={8}
                         onKeyDown={(e) => e.key === "Enter" && handleVerifyPin()}
+                        autoFocus
                       />
-                      <Button onClick={handleVerifyPin} disabled={verifyPinMutation.isPending} className="w-full">
+                      <Button
+                        onClick={handleVerifyPin}
+                        disabled={verifyPinMutation.isPending}
+                        className="w-full"
+                      >
                         Verify PIN
                       </Button>
                     </div>

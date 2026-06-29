@@ -18,6 +18,8 @@ export const mediaTable = pgTable("media", {
   safetyStatus: safetyStatusEnum("safety_status").notNull().default("unpreviewed"),
   lastWatched: timestamp("last_watched", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  // Soft-delete: hides from library but preserves jump frame memory for re-matching
+  hiddenAt: timestamp("hidden_at", { withTimezone: true }),
 });
 
 export const insertMediaSchema = createInsertSchema(mediaTable).omit({ id: true, createdAt: true });

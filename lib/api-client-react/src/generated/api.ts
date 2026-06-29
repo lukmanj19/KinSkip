@@ -859,6 +859,76 @@ export const useDeleteMedia = <TError = ErrorType<unknown>,
       return useMutation(getDeleteMediaMutationOptions(options));
     }
 
+export const getHideMediaUrl = (id: number,) => {
+
+
+
+
+  return `/api/media/${id}/hide`
+}
+
+/**
+ * @summary Soft-delete a media entry from the library (preserves jump frame memory)
+ */
+export const hideMedia = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getHideMediaUrl(id),
+  {
+    ...options,
+    method: 'PATCH'
+
+
+  }
+);}
+
+
+
+
+export const getHideMediaMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof hideMedia>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof hideMedia>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['hideMedia'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof hideMedia>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  hideMedia(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type HideMediaMutationResult = NonNullable<Awaited<ReturnType<typeof hideMedia>>>
+
+    export type HideMediaMutationError = ErrorType<void>
+
+    /**
+ * @summary Soft-delete a media entry from the library (preserves jump frame memory)
+ */
+export const useHideMedia = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof hideMedia>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof hideMedia>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getHideMediaMutationOptions(options));
+    }
+
 export const getUpdateMediaSafetyUrl = (id: number,) => {
 
 

@@ -1,7 +1,11 @@
 import { Router } from "express";
-import { eq, and, desc, or } from "drizzle-orm";
+import { eq, and, desc, or, isNull } from "drizzle-orm";
 import { db, mediaTable, jumpFramesTable, usersTable } from "@workspace/db";
-import { CreateMediaBody, GetMediaParams, DeleteMediaParams, LookupMediaBody, UpdateMediaSafetyBody, UpdateMediaSafetyParams } from "@workspace/api-zod";
+import {
+  CreateMediaBody, GetMediaParams, DeleteMediaParams, LookupMediaBody,
+  UpdateMediaSafetyBody, UpdateMediaSafetyParams,
+  HideMediaParams,
+} from "@workspace/api-zod";
 
 const router = Router();
 
@@ -31,7 +35,11 @@ router.get("/media", async (req, res): Promise<void> => {
     const safeMedia = await db
       .select()
       .from(mediaTable)
-      .where(and(eq(mediaTable.userId, guestAdminId), eq(mediaTable.safetyStatus, "safe")))
+      .where(and(
+        eq(mediaTable.userId, guestAdminId),
+        eq(mediaTable.safetyStatus, "safe"),
+        isNull(mediaTable.hiddenAt),
+      ))
       .orderBy(desc(mediaTable.lastWatched), desc(mediaTable.createdAt))
       .limit(50);
     const result = await Promise.all(
@@ -47,11 +55,10 @@ router.get("/media", async (req, res): Promise<void> => {
   const mediaList = await db
     .select()
     .from(mediaTable)
-    .where(eq(mediaTable.userId, userId))
+    .where(and(eq(mediaTable.userId, userId), isNull(mediaTable.hiddenAt)))
     .orderBy(desc(mediaTable.lastWatched), desc(mediaTable.createdAt))
     .limit(50);
 
-  // Get jump frame counts
   const result = await Promise.all(
     mediaList.map(async (m) => {
       const frames = await db
@@ -82,8 +89,8 @@ router.post("/media", async (req, res): Promise<void> => {
   }
   const { type, title, fileName, fileHash, url, mimeType } = parsed.data;
 
-  // Collapse duplicates: if this user already has a media entry with the same
-  // fileHash, return the existing record instead of creating a new one.
+  // Dedup / restore: if this user already has a record with the same fileHash (visible or hidden),
+  // restore it (un-hide) and return it — all jump frames come back automatically.
   if (fileHash) {
     const [existing] = await db
       .select()
@@ -91,14 +98,23 @@ router.post("/media", async (req, res): Promise<void> => {
       .where(and(eq(mediaTable.userId, userId), eq(mediaTable.fileHash, fileHash)))
       .limit(1);
     if (existing) {
-      await db.update(mediaTable).set({ lastWatched: new Date() }).where(eq(mediaTable.id, existing.id));
+      await db
+        .update(mediaTable)
+        .set({ lastWatched: new Date(), hiddenAt: null })
+        .where(eq(mediaTable.id, existing.id));
       const frames = await db.select().from(jumpFramesTable).where(eq(jumpFramesTable.mediaId, existing.id));
-      res.json({ ...existing, jumpFrameCount: frames.length, lastWatched: new Date().toISOString(), createdAt: existing.createdAt.toISOString() });
+      res.json({
+        ...existing,
+        hiddenAt: null,
+        jumpFrameCount: frames.length,
+        lastWatched: new Date().toISOString(),
+        createdAt: existing.createdAt.toISOString(),
+      });
       return;
     }
   }
 
-  // Check if matching entry already exists in global db
+  // Check if matching entry already exists in global db (for safety inheritance)
   let safetyStatus: "safe" | "unpreviewed" | "flagged" = "unpreviewed";
   if (fileHash || title) {
     const conditions = [];
@@ -183,7 +199,6 @@ router.get("/media/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  // Get jump frames strictly for this media entry only
   const frames = await db
     .select()
     .from(jumpFramesTable)
@@ -198,18 +213,12 @@ router.get("/media/:id", async (req, res): Promise<void> => {
     )
     .orderBy(jumpFramesTable.startTime);
 
-  // Update lastWatched
   await db
     .update(mediaTable)
     .set({ lastWatched: new Date() })
     .where(eq(mediaTable.id, media.id));
 
   const derivedSafetyStatus = frames.length > 0 ? "safe" : media.safetyStatus;
-
-  const jumpFrameList = frames.map((f) => ({
-    ...f,
-    createdAt: f.createdAt.toISOString(),
-  }));
 
   res.json({
     media: {
@@ -218,10 +227,40 @@ router.get("/media/:id", async (req, res): Promise<void> => {
       lastWatched: media.lastWatched?.toISOString() ?? null,
       createdAt: media.createdAt.toISOString(),
     },
-    jumpFrames: jumpFrameList,
+    jumpFrames: frames.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() })),
     safetyStatus: derivedSafetyStatus,
     aiFlag: null,
   });
+});
+
+// PATCH /media/:id/hide — soft-delete (preserves jump frame memory)
+router.patch("/media/:id/hide", async (req, res): Promise<void> => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const params = HideMediaParams.safeParse({ id: Number(req.params.id) });
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const [media] = await db
+    .select()
+    .from(mediaTable)
+    .where(and(eq(mediaTable.id, params.data.id), eq(mediaTable.userId, userId)))
+    .limit(1);
+
+  if (!media) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  await db
+    .update(mediaTable)
+    .set({ hiddenAt: new Date() })
+    .where(eq(mediaTable.id, media.id));
+
+  res.status(204).send();
 });
 
 // PATCH /media/:id/safety — admin only
