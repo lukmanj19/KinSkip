@@ -72,3 +72,44 @@ export async function removeCachedFile(mediaId: number): Promise<void> {
     // silent fail
   }
 }
+
+/** Return total number of cached files and their combined byte size. */
+export async function getCacheStats(): Promise<{ count: number; totalBytes: number }> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.getAll();
+    const records = await new Promise<CachedFile[]>((res, rej) => {
+      req.onsuccess = () => res(req.result as CachedFile[]);
+      req.onerror = () => rej(req.error);
+    });
+    const totalBytes = records.reduce((sum, r) => sum + r.file.size, 0);
+    return { count: records.length, totalBytes };
+  } catch {
+    return { count: 0, totalBytes: 0 };
+  }
+}
+
+/** Wipe every cached file — used by the admin "clear all cache" action. */
+export async function clearAllCachedFiles(): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).clear();
+    await new Promise<void>((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch {
+    // silent fail
+  }
+}
+
+/** Format bytes into a human-readable string (KB / MB / GB). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
