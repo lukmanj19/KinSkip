@@ -147,6 +147,7 @@ export default function AdminDashboardPage() {
                     <TableHead>Media</TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Category</TableHead>
+                    <TableHead>Submitted By</TableHead>
                     <TableHead>AI Check</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -154,14 +155,21 @@ export default function AdminDashboardPage() {
                 <TableBody>
                   {submissions?.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No pending submissions.</TableCell>
+                      <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">No pending submissions.</TableCell>
                     </TableRow>
                   ) : (
                     submissions?.map(sub => (
                       <TableRow key={sub.id}>
                         <TableCell className="font-medium">{sub.mediaTitle || `Media #${sub.mediaId}`}</TableCell>
-                        <TableCell>{sub.startTime}s - {sub.endTime}s</TableCell>
+                        <TableCell className="whitespace-nowrap">{sub.startTime}s – {sub.endTime}s</TableCell>
                         <TableCell className="capitalize">{sub.category}</TableCell>
+                        <TableCell>
+                          {sub.submitterEmail ? (
+                            <span className="text-sm font-medium">{sub.submitterEmail}</span>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Unknown</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           {sub.aiFlag?.flagged ? (
                             <Badge variant="destructive" className="flex w-max items-center gap-1">

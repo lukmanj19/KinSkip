@@ -6,12 +6,12 @@ import { useRoute } from "wouter";
 import {
   useGetMedia, getGetMediaQueryKey,
   useListJumpFrames, useCreateJumpFrame, useDeleteJumpFrame, getListJumpFramesQueryKey,
-  useVerifyPin,
+  useVerifyPin, useUpdateMediaSafety,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ShieldCheck, ShieldAlert, AlertTriangle, Lock, Unlock, Flag,
-  FolderOpen, Clock, X,
+  FolderOpen, Clock, X, ShieldOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +60,7 @@ export default function Player() {
   const verifyPinMutation = useVerifyPin();
   const createJumpFrameMutation = useCreateJumpFrame();
   const deleteJumpFrameMutation = useDeleteJumpFrame();
+  const updateSafetyMutation = useUpdateMediaSafety();
 
   // Check for ?autoplay=1 in URL
   const shouldAutoPlay = typeof window !== "undefined"
@@ -221,6 +222,26 @@ export default function Player() {
     }
   };
 
+  const handleToggleSafety = () => {
+    const newStatus = safetyStatusFromDetail === "safe" ? "unpreviewed" : "safe";
+    updateSafetyMutation.mutate(
+      { id: mediaId, data: { safetyStatus: newStatus } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetMediaQueryKey(mediaId) });
+          toast({
+            title: newStatus === "safe" ? "Marked as Safe" : "Safety status cleared",
+            description:
+              newStatus === "safe"
+                ? "Child accounts can now watch this video in full."
+                : "Video is no longer marked safe — child accounts will be restricted.",
+          });
+        },
+        onError: () => toast({ title: "Failed to update safety status", variant: "destructive" }),
+      }
+    );
+  };
+
   if (!match) return null;
   if (isMediaLoading)
     return (
@@ -374,6 +395,27 @@ export default function Player() {
         <div className="flex items-center gap-3">
           {user?.role === "admin" && (
             <>
+              {/* Mark Safe / Unmark Safe toggle */}
+              {safetyStatusFromDetail === "safe" ? (
+                <Button
+                  variant="outline"
+                  className="gap-2 text-safe border-safe hover:bg-safe/10"
+                  onClick={handleToggleSafety}
+                  disabled={updateSafetyMutation.isPending}
+                >
+                  <ShieldOff className="w-4 h-4" /> Unmark Safe
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="gap-2 text-safe border-safe hover:bg-safe/10"
+                  onClick={handleToggleSafety}
+                  disabled={updateSafetyMutation.isPending}
+                >
+                  <ShieldCheck className="w-4 h-4" /> Mark Safe
+                </Button>
+              )}
+
               {/* Add Skip Frame — Dialog overlay (keeps video playing) */}
               <Dialog open={isSkipFrameDialogOpen} onOpenChange={setIsSkipFrameDialogOpen}>
                 <DialogTrigger asChild>

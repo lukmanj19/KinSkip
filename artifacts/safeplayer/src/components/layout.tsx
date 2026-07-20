@@ -1,9 +1,16 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
-import { Shield, Home, Settings, LayoutDashboard, LogOut, LogIn, UserPlus, WifiOff, Wifi } from "lucide-react";
+import { Shield, Home, Settings, LayoutDashboard, LogOut, LogIn, UserPlus, WifiOff, Wifi, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLogout } from "@workspace/api-client-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { SettingsPanel } from "@/components/settings-panel";
 
 /** Global network status hook — listens to browser online/offline events. */
 function useOnlineStatus() {
@@ -47,7 +54,6 @@ function NetworkBanner() {
     );
   }
 
-  // Just came back online
   return (
     <div className="w-full bg-safe text-safe-foreground px-4 py-2 flex items-center justify-center gap-2 text-sm font-medium z-50">
       <Wifi className="w-4 h-4 shrink-0" />
@@ -60,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const logoutMutation = useLogout();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleLogout = () => {
     logoutMutation.mutate(undefined, {
@@ -103,7 +110,6 @@ export function Layout({ children }: { children: ReactNode }) {
       ? [
           { label: "Admin", href: "/admin", icon: LayoutDashboard },
           { label: "Library", href: "/dashboard", icon: Home },
-          { label: "Settings", href: "/settings", icon: Settings },
         ]
       : [{ label: "Library", href: "/dashboard", icon: Home }];
 
@@ -138,6 +144,16 @@ export function Layout({ children }: { children: ReactNode }) {
                 </Button>
               );
             })}
+
+            {/* Settings — opens as overlay Sheet, never navigates away */}
+            <Button
+              variant="ghost"
+              className="justify-start gap-2"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings className="h-4 w-4" />
+              <span className="hidden md:inline">Settings</span>
+            </Button>
           </div>
 
           <div className="flex items-center gap-2 mt-auto pt-4 border-t border-border hidden md:flex">
@@ -158,6 +174,26 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+
+      {/* Settings Sheet — floats over all content, video keeps playing */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+          <SheetHeader className="flex flex-row items-center justify-between pb-4 border-b mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5 text-primary" /> Settings
+            </SheetTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="-mr-2"
+              onClick={() => setSettingsOpen(false)}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </SheetHeader>
+          <SettingsPanel />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
