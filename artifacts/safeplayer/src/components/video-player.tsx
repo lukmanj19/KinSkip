@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, forwardRef } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   Captions, SkipForward, SkipBack, Square, Film, X, Upload, Globe, Check,
-  FolderOpen, Shuffle, Music, FileVideo, ListMusic
+  FolderOpen, Shuffle, Music, FileVideo, ListMusic, Search, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import {
   Drawer, DrawerContent, DrawerHeader, DrawerTitle,
 } from "@/components/ui/drawer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
 interface JumpFrame {
@@ -20,6 +21,17 @@ interface JumpFrame {
   category: string;
 }
 
+interface SubtitleResult {
+  id: string;
+  fileId: number;
+  fileName: string;
+  language: string;
+  releaseName: string;
+  movieName: string;
+  downloadCount: number;
+  format: string;
+}
+
 interface VideoPlayerProps {
   src: string | undefined;
   jumpFrames?: JumpFrame[];
@@ -27,6 +39,7 @@ interface VideoPlayerProps {
   onProgressUpdate?: (currentTime: number, duration: number) => void;
   onLocalFileLoaded?: (fileName: string) => void;
   suppressFilePickerOnPlay?: boolean;
+  mediaTitle?: string;
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -39,6 +52,24 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const MEDIA_ACCEPT = "video/*,audio/*,.mp4,.mkv,.webm,.avi,.mov,.mp3,.flac,.wav,.aac,.ogg,.m4a";
+
+const SUBTITLE_LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "zh-CN", label: "Chinese (Simplified)" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "ar", label: "Arabic" },
+  { code: "ru", label: "Russian" },
+  { code: "nl", label: "Dutch" },
+  { code: "pl", label: "Polish" },
+  { code: "tr", label: "Turkish" },
+  { code: "hi", label: "Hindi" },
+];
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) return "0:00";
@@ -73,7 +104,7 @@ function shortName(name: string, maxLen = 42): string {
 }
 
 export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
-  ({ src, jumpFrames = [], filteredMode = true, onProgressUpdate, onLocalFileLoaded, suppressFilePickerOnPlay }, forwardedRef) => {
+  ({ src, jumpFrames = [], filteredMode = true, onProgressUpdate, onLocalFileLoaded, suppressFilePickerOnPlay, mediaTitle }, forwardedRef) => {
     const { toast } = useToast();
     const internalRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -111,6 +142,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     const [isSubDrawerOpen, setIsSubDrawerOpen] = useState(false);
     const [urlInput, setUrlInput] = useState("");
     const [isFetching, setIsFetching] = useState(false);
+
+    // Subtitle search (Search Online tab)
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchLang, setSearchLang] = useState("en");
+    const [searchResults, setSearchResults] = useState<SubtitleResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [downloadingFileId, setDownloadingFileId] = useState<number | null>(null);
 
     const effectiveSrc = localSrc ?? src;
     // Always apply jump frames — the parent page controls which frames are relevant
@@ -379,6 +417,63 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
         toast({ title: "Failed to fetch subtitle", description: String(err), variant: "destructive" });
       } finally {
         setIsFetching(false);
+      }
+    }
+
+    // Pre-fill search query with media title when drawer opens (only if query is empty)
+    useEffect(() => {
+      if (isSubDrawerOpen && mediaTitle && !searchQuery) {
+        setSearchQuery(mediaTitle);
+      }
+      // Clear results when drawer closes so the next open starts fresh
+      if (!isSubDrawerOpen) setSearchResults([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSubDrawerOpen]);
+
+    async function handleSubtitleSearch() {
+      if (!searchQuery.trim()) return;
+      setIsSearching(true);
+      setSearchResults([]);
+      try {
+        const params = new URLSearchParams({ q: searchQuery.trim(), languages: searchLang });
+        const res = await fetch(`/api/subtitles/search?${params}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error ?? `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const results: SubtitleResult[] = data.results ?? [];
+        setSearchResults(results);
+        if (results.length === 0) {
+          toast({ title: "No subtitles found", description: "Try a different title or language." });
+        }
+      } catch (err) {
+        toast({ title: "Search failed", description: String(err), variant: "destructive" });
+      } finally {
+        setIsSearching(false);
+      }
+    }
+
+    async function handleDownloadSubtitle(result: SubtitleResult) {
+      setDownloadingFileId(result.fileId);
+      try {
+        const res = await fetch("/api/subtitles/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: result.fileId }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error ?? `HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        const fileName = res.headers.get("X-Subtitle-FileName") ?? result.fileName;
+        const vtt = text.trimStart().startsWith("WEBVTT") ? text : srtToVtt(text);
+        applySubtitle(vtt, fileName);
+      } catch (err) {
+        toast({ title: "Download failed", description: String(err), variant: "destructive" });
+      } finally {
+        setDownloadingFileId(null);
       }
     }
 
@@ -744,16 +839,83 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
                 </div>
               )}
 
-              <Tabs defaultValue="file">
+              <Tabs defaultValue="search">
                 <TabsList className="w-full mb-4">
-                  <TabsTrigger value="file" className="flex-1 gap-2">
-                    <Upload className="w-4 h-4" /> From Device
+                  <TabsTrigger value="search" className="flex-1 gap-1.5 text-xs">
+                    <Search className="w-3.5 h-3.5" /> Search Online
                   </TabsTrigger>
-                  <TabsTrigger value="url" className="flex-1 gap-2">
-                    <Globe className="w-4 h-4" /> From Internet
+                  <TabsTrigger value="file" className="flex-1 gap-1.5 text-xs">
+                    <Upload className="w-3.5 h-3.5" /> From Device
+                  </TabsTrigger>
+                  <TabsTrigger value="url" className="flex-1 gap-1.5 text-xs">
+                    <Globe className="w-3.5 h-3.5" /> From URL
                   </TabsTrigger>
                 </TabsList>
 
+                {/* ── Search Online ── */}
+                <TabsContent value="search" className="space-y-3">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Movie or show title…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSubtitleSearch()}
+                      className="flex-1"
+                    />
+                    <Select value={searchLang} onValueChange={setSearchLang}>
+                      <SelectTrigger className="w-32 shrink-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SUBTITLE_LANGUAGES.map((l) => (
+                          <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    className="w-full gap-2"
+                    onClick={handleSubtitleSearch}
+                    disabled={isSearching || !searchQuery.trim()}
+                  >
+                    {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    {isSearching ? "Searching…" : "Search"}
+                  </Button>
+
+                  {searchResults.length > 0 && (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                      {searchResults.map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-center gap-2 rounded-lg border border-border p-2.5 text-sm hover:bg-muted/50 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate leading-tight">
+                              {r.movieName || r.releaseName || r.fileName}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {r.language.toUpperCase()} · {r.format.toUpperCase()} · {r.downloadCount.toLocaleString()} downloads
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0 gap-1.5 h-7 px-2.5 text-xs"
+                            disabled={downloadingFileId === r.fileId}
+                            onClick={() => handleDownloadSubtitle(r)}
+                          >
+                            {downloadingFileId === r.fileId
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Check className="w-3 h-3" />}
+                            {downloadingFileId === r.fileId ? "Loading…" : "Use"}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* ── From Device ── */}
                 <TabsContent value="file" className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     Pick a <code className="text-xs bg-muted px-1 py-0.5 rounded">.srt</code> or{" "}
@@ -764,6 +926,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
                   </Button>
                 </TabsContent>
 
+                {/* ── From URL ── */}
                 <TabsContent value="url" className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     Paste a direct URL to a subtitle file. CORS is handled server-side.

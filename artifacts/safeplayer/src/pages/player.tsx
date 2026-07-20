@@ -338,6 +338,7 @@ export default function Player() {
             onProgressUpdate={handleProgressUpdate}
             onLocalFileLoaded={(name) => setLocalFileName(name)}
             suppressFilePickerOnPlay={media.type === "file"}
+            mediaTitle={media.title}
           />
         )}
 

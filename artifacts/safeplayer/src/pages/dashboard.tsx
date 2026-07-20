@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
 import { LAST_ADMIN_KEY } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import {
   useListMedia, useCreateMedia, useUpdateMediaSafety, useHideMedia,
   getListMediaQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
   ShieldAlert, ShieldCheck, Shield, Plus, Film, Link as LinkIcon,
@@ -61,8 +61,6 @@ export default function Dashboard() {
   const hideMediaMutation = useHideMedia();
 
   const [urlInput, setUrlInput] = useState("");
-  const [guestMedia, setGuestMedia] = useState<any[]>([]);
-  const [guestLoading, setGuestLoading] = useState(false);
 
   // Ref for the "re-select to play" hidden file picker
   const reSelectInputRef = useRef<HTMLInputElement>(null);
@@ -70,16 +68,19 @@ export default function Dashboard() {
 
   const lastAdminId = !user ? localStorage.getItem(LAST_ADMIN_KEY) : null;
 
-  // Fetch safe content for guest mode
-  useEffect(() => {
-    if (user || !lastAdminId) return;
-    setGuestLoading(true);
-    fetch(`/api/media?guestAdminId=${lastAdminId}`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => setGuestMedia(Array.isArray(data) ? data : []))
-      .catch(() => setGuestMedia([]))
-      .finally(() => setGuestLoading(false));
-  }, [user, lastAdminId]);
+  // Fetch safe content for guest mode — React Query so it refetches on focus/remount
+  const { data: guestMediaData, isLoading: guestLoading } = useQuery({
+    queryKey: ["guest-media", lastAdminId],
+    queryFn: async () => {
+      const r = await fetch(`/api/media?guestAdminId=${lastAdminId}`, { credentials: "include" });
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !user && !!lastAdminId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+  const guestMedia: any[] = guestMediaData ?? [];
 
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
