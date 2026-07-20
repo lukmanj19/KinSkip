@@ -99,6 +99,28 @@ export const SetPinBody = zod.object({
 
 
 /**
+ * @summary Request a password reset link (returns reset URL since no email server)
+ */
+export const ForgotPasswordBody = zod.object({
+  "email": zod.string()
+})
+
+export const ForgotPasswordResponse = zod.object({
+  "resetUrl": zod.string(),
+  "expiresIn": zod.string()
+})
+
+
+/**
+ * @summary Exchange a reset token for a new password
+ */
+export const ResetPasswordBody = zod.object({
+  "token": zod.string(),
+  "newPassword": zod.string()
+})
+
+
+/**
  * @summary List recently viewed media for current user
  */
 export const ListMediaResponseItem = zod.object({
@@ -424,6 +446,18 @@ export const UpdateUserRoleResponse = zod.object({
   "tier": zod.enum(['free', 'premium']),
   "hasPin": zod.boolean().optional(),
   "createdAt": zod.coerce.date().optional()
+})
+
+
+/**
+ * @summary Delete a non-admin user account
+ */
+export const DeleteUserParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteUserResponse = zod.object({
+  "ok": zod.boolean().optional()
 })
 
 

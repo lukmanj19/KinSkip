@@ -1,7 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { eq, count } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import crypto from "crypto";
+import { eq, count, and, gt, isNull } from "drizzle-orm";
+import { db, usersTable, passwordResetTokensTable } from "@workspace/db";
 import {
   RegisterBody,
   LoginBody,
@@ -32,7 +33,6 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   }
   const { email, password, role, displayName } = parsed.data;
 
-  // Enforce maximum of 2 administrator accounts
   if (role === "admin") {
     const [{ adminCount }] = await db
       .select({ adminCount: count() })
@@ -41,7 +41,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     if (adminCount >= 2) {
       res.status(403).json({
         error: "ADMIN_LIMIT_REACHED",
-        message: "This device already has 2 administrator accounts. Contact the manufacturer for review.",
+        message: "This device already has 2 administrator accounts.",
       });
       return;
     }
@@ -157,7 +157,6 @@ router.post("/auth/verify-pin", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Wrong PIN" });
     return;
   }
-  // Store unfiltered session token (expires in 30min)
   const unfilteredToken = `unfiltered_${Date.now()}_${user.id}`;
   req.session.unfilteredToken = unfilteredToken;
   req.session.unfilteredExpires = Date.now() + 30 * 60 * 1000;
@@ -180,6 +179,105 @@ router.post("/auth/set-pin", async (req, res): Promise<void> => {
     .update(usersTable)
     .set({ pinHash })
     .where(eq(usersTable.id, req.session.userId));
+  res.json({ ok: true });
+});
+
+// POST /auth/forgot-password
+// Generates a reset token and returns the reset URL directly (no email server).
+// The admin can copy and share this link with the user.
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const { email } = req.body as { email?: string };
+  if (!email) {
+    res.status(400).json({ error: "Email required" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, email.toLowerCase().trim()))
+    .limit(1);
+
+  if (!user) {
+    // Return 404 so the UI can tell the user their email wasn't found
+    res.status(404).json({ error: "No account found with that email" });
+    return;
+  }
+
+  // Generate a secure random token (64 hex chars)
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  // Invalidate any existing unused tokens for this user first
+  await db
+    .delete(passwordResetTokensTable)
+    .where(
+      and(
+        eq(passwordResetTokensTable.userId, user.id),
+        isNull(passwordResetTokensTable.usedAt)
+      )
+    );
+
+  await db.insert(passwordResetTokensTable).values({
+    userId: user.id,
+    token,
+    expiresAt,
+  });
+
+  // Build the reset URL using the request's origin
+  const origin = `${req.protocol}://${req.get("host")}`;
+  const resetUrl = `${origin}/reset-password?token=${token}`;
+
+  res.json({
+    resetUrl,
+    expiresIn: "1 hour",
+  });
+});
+
+// POST /auth/reset-password
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const { token, newPassword } = req.body as { token?: string; newPassword?: string };
+
+  if (!token || !newPassword) {
+    res.status(400).json({ error: "Token and new password required" });
+    return;
+  }
+  if (newPassword.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+
+  const now = new Date();
+  const [record] = await db
+    .select()
+    .from(passwordResetTokensTable)
+    .where(
+      and(
+        eq(passwordResetTokensTable.token, token),
+        isNull(passwordResetTokensTable.usedAt),
+        gt(passwordResetTokensTable.expiresAt, now)
+      )
+    )
+    .limit(1);
+
+  if (!record) {
+    res.status(400).json({ error: "Invalid or expired reset link" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  await db
+    .update(usersTable)
+    .set({ passwordHash })
+    .where(eq(usersTable.id, record.userId));
+
+  // Mark token as used
+  await db
+    .update(passwordResetTokensTable)
+    .set({ usedAt: now })
+    .where(eq(passwordResetTokensTable.id, record.id));
+
   res.json({ ok: true });
 });
 

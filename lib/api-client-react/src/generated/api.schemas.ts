@@ -84,6 +84,20 @@ export interface AuthResponse {
   token: string;
 }
 
+export interface ForgotPasswordInput {
+  email: string;
+}
+
+export interface ForgotPasswordPayload {
+  resetUrl: string;
+  expiresIn: string;
+}
+
+export interface ResetPasswordInput {
+  token: string;
+  newPassword: string;
+}
+
 export type UserRoleUpdateRole = typeof UserRoleUpdateRole[keyof typeof UserRoleUpdateRole];
 
 
@@ -398,4 +412,8 @@ export const ListSubmissionsStatus = {
   rejected: 'rejected',
   flagged: 'flagged',
 } as const;
+
+export type DeleteUser200 = {
+  ok?: boolean;
+};
 

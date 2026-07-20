@@ -1,15 +1,24 @@
 import { useAuth } from "@/lib/auth";
 import { Redirect } from "wouter";
 import { useState } from "react";
-import { useGetAdminDashboard, getGetAdminDashboardQueryKey, useListUsers, useListSubmissions, useListFlaggedContent, useApproveSubmission, useRejectSubmission, getListSubmissionsQueryKey } from "@workspace/api-client-react";
+import {
+  useGetAdminDashboard, getGetAdminDashboardQueryKey,
+  useListUsers, getListUsersQueryKey,
+  useListSubmissions, useListFlaggedContent,
+  useApproveSubmission, useRejectSubmission, getListSubmissionsQueryKey,
+  useDeleteUser,
+  useForgotPassword,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Film, Flag, CheckCircle2, XCircle, AlertTriangle, Activity, KeyRound } from "lucide-react";
+import { Users, Film, Flag, CheckCircle2, XCircle, AlertTriangle, Activity, KeyRound, Trash2, Link as LinkIcon, Copy } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
@@ -17,17 +26,29 @@ export default function AdminDashboardPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Reset password dialog state
   const [resetTarget, setResetTarget] = useState<{ id: number; email: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [isResetting, setIsResetting] = useState(false);
 
-  // All hooks must be called unconditionally before any early return
+  // Delete user confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; email: string } | null>(null);
+
+  // Reset link dialog state
+  const [resetLinkEmail, setResetLinkEmail] = useState<string | null>(null);
+  const [resetLink, setResetLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // All hooks called unconditionally before any early return
   const { data: stats } = useGetAdminDashboard();
   const { data: users } = useListUsers();
   const { data: submissions } = useListSubmissions({ status: "pending" });
   const { data: flagged } = useListFlaggedContent();
   const approveMutation = useApproveSubmission();
   const rejectMutation = useRejectSubmission();
+  const deleteUserMutation = useDeleteUser();
+  const forgotMutation = useForgotPassword();
 
   if (!user || user.role !== "admin") {
     return <Redirect to="/dashboard" />;
@@ -57,6 +78,52 @@ export default function AdminDashboardPage() {
     }
   }
 
+  function handleGenerateResetLink(email: string) {
+    setResetLinkEmail(email);
+    setResetLink(null);
+    setLinkCopied(false);
+    forgotMutation.mutate(
+      { data: { email } },
+      {
+        onSuccess: (data) => setResetLink(data.resetUrl),
+        onError: async (err: any) => {
+          let description = "Could not generate link.";
+          try { const b = await err?.response?.json?.() ?? {}; if (b.error) description = b.error; } catch {}
+          toast({ title: "Failed", description, variant: "destructive" });
+          setResetLinkEmail(null);
+        },
+      }
+    );
+  }
+
+  function handleCopyLink() {
+    if (!resetLink) return;
+    navigator.clipboard.writeText(resetLink).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    });
+  }
+
+  function handleDeleteUser(id: number) {
+    deleteUserMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetAdminDashboardQueryKey() });
+          toast({ title: "Account deleted" });
+          setDeleteTarget(null);
+        },
+        onError: async (err: any) => {
+          let description = "Could not delete account.";
+          try { const b = await err?.response?.json?.() ?? {}; if (b.error) description = b.error; } catch {}
+          toast({ title: "Delete failed", description, variant: "destructive" });
+          setDeleteTarget(null);
+        },
+      }
+    );
+  }
+
   const handleApprove = (id: number) => {
     approveMutation.mutate(
       { id },
@@ -64,7 +131,7 @@ export default function AdminDashboardPage() {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListSubmissionsQueryKey({ status: "pending" }) });
           toast({ title: "Submission approved" });
-        }
+        },
       }
     );
   };
@@ -75,8 +142,8 @@ export default function AdminDashboardPage() {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListSubmissionsQueryKey({ status: "pending" }) });
-          toast({ title: "Submission rejected" });
-        }
+          toast({ title: "Submission rejected — jump frames removed and media reset to unpreviewed" });
+        },
       }
     );
   };
@@ -138,7 +205,9 @@ export default function AdminDashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Pending Skip Frames</CardTitle>
-              <CardDescription>Review skip frames submitted by users.</CardDescription>
+              <CardDescription>
+                Review skip frames submitted by users. Rejecting a submission removes its frames from the media and resets its safety status.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -204,6 +273,7 @@ export default function AdminDashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>User Management</CardTitle>
+              <CardDescription>Manage viewer accounts. Admin accounts are protected from deletion.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -230,14 +300,35 @@ export default function AdminDashboardPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5"
-                          onClick={() => { setResetTarget({ id: u.id, email: u.email }); setNewPassword(""); }}
-                        >
-                          <KeyRound className="w-3.5 h-3.5" /> Reset Password
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={() => handleGenerateResetLink(u.email)}
+                            disabled={forgotMutation.isPending && resetLinkEmail === u.email}
+                          >
+                            <LinkIcon className="w-3.5 h-3.5" /> Reset Link
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={() => { setResetTarget({ id: u.id, email: u.email }); setNewPassword(""); }}
+                          >
+                            <KeyRound className="w-3.5 h-3.5" /> Reset PW
+                          </Button>
+                          {u.role !== "admin" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5 text-danger hover:text-danger hover:bg-danger/10"
+                              onClick={() => setDeleteTarget({ id: u.id, email: u.email })}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Delete
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -252,7 +343,7 @@ export default function AdminDashboardPage() {
               <DialogHeader>
                 <DialogTitle>Reset Password</DialogTitle>
                 <DialogDescription>
-                  Set a new password for <strong>{resetTarget?.email}</strong>. The user must log in with this password.
+                  Set a new password for <strong>{resetTarget?.email}</strong>.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">
@@ -269,6 +360,65 @@ export default function AdminDashboardPage() {
                   className="w-full"
                 >
                   {isResetting ? "Resetting…" : "Set New Password"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Generate Reset Link Dialog */}
+          <Dialog open={!!resetLinkEmail} onOpenChange={(open) => { if (!open) { setResetLinkEmail(null); setResetLink(null); setLinkCopied(false); } }}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-primary" /> Password Reset Link
+                </DialogTitle>
+                <DialogDescription>
+                  {resetLink
+                    ? `Copy this link and share it with ${resetLinkEmail}. It expires in 1 hour.`
+                    : `Generating reset link for ${resetLinkEmail}…`}
+                </DialogDescription>
+              </DialogHeader>
+              {resetLink && (
+                <div className="space-y-4 mt-1">
+                  <div className="rounded-lg border bg-muted/50 p-3 space-y-1">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Reset link</p>
+                    <p className="text-xs break-all font-mono text-foreground leading-relaxed">{resetLink}</p>
+                  </div>
+                  <Button className="w-full gap-2" onClick={handleCopyLink} variant={linkCopied ? "secondary" : "default"}>
+                    {linkCopied ? <><CheckCircle2 className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy link</>}
+                  </Button>
+                </div>
+              )}
+              {!resetLink && forgotMutation.isPending && (
+                <div className="py-4 flex justify-center">
+                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete User Confirmation */}
+          <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-danger">
+                  <Trash2 className="w-4 h-4" /> Delete account?
+                </DialogTitle>
+                <DialogDescription>
+                  This will permanently delete <strong>{deleteTarget?.email}</strong> and all their data. This cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-3 mt-2">
+                <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  disabled={deleteUserMutation.isPending}
+                  onClick={() => deleteTarget && handleDeleteUser(deleteTarget.id)}
+                >
+                  {deleteUserMutation.isPending ? "Deleting…" : "Yes, delete"}
                 </Button>
               </div>
             </DialogContent>
@@ -292,9 +442,9 @@ export default function AdminDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {flagged?.length === 0 ? (
-                     <TableRow>
-                       <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">No flagged content.</TableCell>
-                     </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">No flagged content.</TableCell>
+                    </TableRow>
                   ) : (
                     flagged?.map(f => (
                       <TableRow key={f.id}>

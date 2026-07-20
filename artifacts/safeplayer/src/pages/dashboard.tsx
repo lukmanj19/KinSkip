@@ -50,6 +50,12 @@ export default function Dashboard() {
     query: { enabled: !!user, queryKey: getListMediaQueryKey() },
   });
 
+  // Only show items added within the last 4 days in the "Recent Media" section
+  const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+  const recentMediaItems = mediaItems?.filter(
+    (m) => new Date(m.createdAt) >= fourDaysAgo
+  );
+
   const createMediaMutation = useCreateMedia();
   const updateSafetyMutation = useUpdateMediaSafety();
   const hideMediaMutation = useHideMedia();
@@ -348,15 +354,21 @@ export default function Dashboard() {
               <Skeleton key={i} className="h-32 w-full" />
             ))}
           </div>
-        ) : mediaItems?.length === 0 ? (
+        ) : recentMediaItems?.length === 0 ? (
           <div className="text-center py-12 border border-dashed rounded-lg">
             <Shield className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-foreground">No media yet</h3>
-            <p className="text-sm text-muted-foreground">Load a file or URL above to get started.</p>
+            <h3 className="text-lg font-medium text-foreground">
+              {mediaItems && mediaItems.length > 0 ? "No recent media" : "No media yet"}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {mediaItems && mediaItems.length > 0
+                ? "Items added more than 4 days ago are not shown here."
+                : "Load a file or URL above to get started."}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mediaItems?.map((media) => {
+            {recentMediaItems?.map((media) => {
               const needsReview = media.safetyStatus !== "safe" && user?.role === "admin";
               const isMarkingThis =
                 updateSafetyMutation.isPending && updateSafetyMutation.variables?.id === media.id;

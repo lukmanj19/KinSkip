@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useState } from "react";
-import { useLogin, useRegister, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useLogin, useRegister, useForgotPassword, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, ArrowLeft } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Shield, ArrowLeft, Copy, CheckCircle2, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const loginSchema = z.object({
@@ -32,10 +33,15 @@ export default function AuthPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [showForgot, setShowForgot] = useState(false);
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetUrl, setResetUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loginMutation = useLogin();
   const registerMutation = useRegister();
+  const forgotMutation = useForgotPassword();
 
   const loginForm = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -83,7 +89,7 @@ export default function AuthPage() {
           try {
             const body = await err?.response?.json?.() ?? {};
             if (body?.error === "ADMIN_LIMIT_REACHED") {
-              description = body.message ?? "Maximum 2 administrator accounts allowed. Contact the manufacturer for review.";
+              description = body.message ?? "Maximum 2 administrator accounts allowed.";
             } else if (body?.error === "Email already registered") {
               description = "An account with this email already exists.";
             }
@@ -92,6 +98,43 @@ export default function AuthPage() {
         },
       }
     );
+  }
+
+  function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!forgotEmail) return;
+    forgotMutation.mutate(
+      { data: { email: forgotEmail } },
+      {
+        onSuccess: (data) => {
+          setResetUrl(data.resetUrl);
+        },
+        onError: async (err: any) => {
+          let description = "Something went wrong. Please try again.";
+          try {
+            const body = await err?.response?.json?.() ?? {};
+            if (body?.error) description = body.error;
+          } catch {}
+          toast({ title: "Could not generate reset link", description, variant: "destructive" });
+        },
+      }
+    );
+  }
+
+  function handleCopy() {
+    if (!resetUrl) return;
+    navigator.clipboard.writeText(resetUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  function handleForgotClose() {
+    setForgotOpen(false);
+    setForgotEmail("");
+    setResetUrl(null);
+    setCopied(false);
+    forgotMutation.reset();
   }
 
   return (
@@ -158,29 +201,13 @@ export default function AuthPage() {
                     </Button>
                     <button
                       type="button"
-                      onClick={() => setShowForgot(true)}
+                      onClick={() => setForgotOpen(true)}
                       className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors mt-1"
                     >
                       Forgot password?
                     </button>
                   </form>
                 </Form>
-
-                {showForgot && (
-                  <div className="mt-4 rounded-lg border bg-muted/50 p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">Account recovery</p>
-                      <button onClick={() => setShowForgot(false)} className="text-muted-foreground hover:text-foreground">
-                        <ArrowLeft className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      Password resets are managed by your family administrator. Ask them to open the{" "}
-                      <strong>Admin Dashboard → Users</strong> tab and use the{" "}
-                      <strong>Reset Password</strong> option next to your account.
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -264,6 +291,66 @@ export default function AuthPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={forgotOpen} onOpenChange={(open) => { if (!open) handleForgotClose(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-primary" /> Password Reset
+            </DialogTitle>
+            <DialogDescription>
+              {resetUrl
+                ? "Copy this link and open it in a browser to set a new password. It expires in 1 hour."
+                : "Enter the email address for the account. A reset link will be generated for you to share."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!resetUrl ? (
+            <form onSubmit={handleForgotSubmit} className="space-y-4 mt-1">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Email address</label>
+                <Input
+                  type="email"
+                  placeholder="name@example.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={forgotMutation.isPending || !forgotEmail}
+              >
+                {forgotMutation.isPending ? "Generating…" : "Generate reset link"}
+              </Button>
+            </form>
+          ) : (
+            <div className="space-y-4 mt-1">
+              <div className="rounded-lg border bg-muted/50 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Reset link</p>
+                <p className="text-xs break-all font-mono text-foreground leading-relaxed">{resetUrl}</p>
+              </div>
+              <Button
+                className="w-full gap-2"
+                onClick={handleCopy}
+                variant={copied ? "secondary" : "default"}
+              >
+                {copied ? (
+                  <><CheckCircle2 className="w-4 h-4" /> Copied!</>
+                ) : (
+                  <><Copy className="w-4 h-4" /> Copy reset link</>
+                )}
+              </Button>
+              <p className="text-xs text-center text-muted-foreground">
+                Open this link in the user's browser to set a new password.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

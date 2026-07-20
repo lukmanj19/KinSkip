@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { eq, and, or } from "drizzle-orm";
-import { db, jumpFramesTable, mediaTable, submissionsTable, activityTable, flaggedContentTable } from "@workspace/db"; // mediaTable kept for POST (updates safetyStatus)
+import { eq, and, or, count } from "drizzle-orm";
+import { db, jumpFramesTable, mediaTable, submissionsTable, activityTable, flaggedContentTable } from "@workspace/db";
 import {
   ListJumpFramesQueryParams,
   CreateJumpFrameBody,
@@ -23,7 +23,6 @@ function optionalAuth(req: any): number | null {
 }
 
 // GET /jumpframes
-// Returns frames strictly belonging to the requested mediaId only.
 router.get("/jumpframes", async (req, res): Promise<void> => {
   const userId = optionalAuth(req);
 
@@ -38,7 +37,7 @@ router.get("/jumpframes", async (req, res): Promise<void> => {
 
   const { mediaId } = parsed.data;
 
-  // Guest mode: no session — only return globally validated frames for safe media
+  // Guest mode: only return globally validated frames for safe media
   if (!userId) {
     const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, mediaId)).limit(1);
     if (!media || media.safetyStatus !== "safe") {
@@ -88,7 +87,7 @@ router.post("/jumpframes", async (req, res): Promise<void> => {
     return;
   }
 
-  // AI guardrails: block sexual/extreme violence submissions, flag for admin review
+  // AI guardrails: flag sexual/violence submissions
   const isExtremeContent = category === "sexual";
   let aiFlagged = false;
   let aiSeverity = "low";
@@ -104,7 +103,6 @@ router.post("/jumpframes", async (req, res): Promise<void> => {
     aiReason = "Submission categorized as violence — flagged for admin review";
   }
 
-  // Save personal jump frame first
   const [frame] = await db
     .insert(jumpFramesTable)
     .values({
@@ -118,15 +116,14 @@ router.post("/jumpframes", async (req, res): Promise<void> => {
     })
     .returning();
 
-  // Update media safety status to safe if it has frames
+  // Media has at least one frame — mark as safe
   await db
     .update(mediaTable)
     .set({ safetyStatus: "safe" })
     .where(eq(mediaTable.id, mediaId));
 
-  // If submitToGlobal, create a submission entry
-  if (submitToGlobal) {
-    const [submission] = await db
+  if (submitToGlobal || aiFlagged) {
+    const [sub] = await db
       .insert(submissionsTable)
       .values({
         mediaId,
@@ -137,24 +134,19 @@ router.post("/jumpframes", async (req, res): Promise<void> => {
         submittedBy: userId,
         aiFlagged,
         aiReason,
-        aiSeverity: aiFlagged ? aiSeverity : null,
+        aiSeverity,
       })
       .returning();
 
     if (aiFlagged) {
       await db.insert(flaggedContentTable).values({
         type: "submission",
-        referenceId: submission.id,
-        severity: aiSeverity as "low" | "medium" | "high" | "extreme",
+        severity: aiSeverity as "extreme" | "high" | "low",
         reason: aiReason ?? "AI flagged",
         resolved: false,
+        referenceId: sub.id,
       });
     }
-
-    await db.insert(activityTable).values({
-      type: "submission",
-      description: `New ${category} frame submitted for media #${mediaId}`,
-    });
   }
 
   res.status(201).json({ ...frame, createdAt: frame.createdAt.toISOString() });
@@ -171,6 +163,20 @@ router.delete("/jumpframes/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  // Fetch the frame first so we know its mediaId
+  const [frame] = await db
+    .select()
+    .from(jumpFramesTable)
+    .where(eq(jumpFramesTable.id, params.data.id))
+    .limit(1);
+
+  if (!frame) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const mediaId = frame.mediaId;
+
   await db
     .delete(jumpFramesTable)
     .where(
@@ -179,6 +185,20 @@ router.delete("/jumpframes/:id", async (req, res): Promise<void> => {
         eq(jumpFramesTable.submittedBy, userId)
       )
     );
+
+  // After deletion: if no frames remain for this media, reset its safety to unpreviewed
+  const [{ remaining }] = await db
+    .select({ remaining: count() })
+    .from(jumpFramesTable)
+    .where(eq(jumpFramesTable.mediaId, mediaId));
+
+  if (remaining === 0) {
+    await db
+      .update(mediaTable)
+      .set({ safetyStatus: "unpreviewed" })
+      .where(eq(mediaTable.id, mediaId));
+  }
+
   res.status(204).send();
 });
 

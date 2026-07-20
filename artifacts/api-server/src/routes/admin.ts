@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, count } from "drizzle-orm";
+import { eq, count, ne } from "drizzle-orm";
 import { db, usersTable, mediaTable, submissionsTable, flaggedContentTable, activityTable } from "@workspace/db";
 import { UpdateUserRoleParams, UpdateUserRoleBody } from "@workspace/api-zod";
 import bcrypt from "bcryptjs";
@@ -105,6 +105,40 @@ router.patch("/admin/users/:id/role", async (req, res): Promise<void> => {
     hasPin: !!user.pinHash,
     createdAt: user.createdAt.toISOString(),
   });
+});
+
+// DELETE /admin/users/:id — remove a non-admin account
+router.delete("/admin/users/:id", async (req, res): Promise<void> => {
+  const requesterId = requireAuth(req, res);
+  if (!requesterId) return;
+
+  const targetId = Number(req.params.id);
+  if (!targetId || isNaN(targetId)) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+
+  // Prevent deleting yourself
+  if (targetId === requesterId) {
+    res.status(403).json({ error: "You cannot delete your own account" });
+    return;
+  }
+
+  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, targetId)).limit(1);
+  if (!target) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  // Protect admin accounts — cannot be deleted via this route
+  if (target.role === "admin") {
+    res.status(403).json({ error: "Admin accounts cannot be deleted" });
+    return;
+  }
+
+  await db.delete(usersTable).where(eq(usersTable.id, targetId));
+
+  res.json({ ok: true });
 });
 
 // PATCH /admin/users/:id/reset-password

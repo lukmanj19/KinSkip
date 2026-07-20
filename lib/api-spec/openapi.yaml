@@ -137,6 +137,44 @@ paths:
         "200":
           description: OK
 
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request a password reset link (returns reset URL since no email server)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordInput"
+      responses:
+        "200":
+          description: Reset link generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgotPasswordPayload"
+        "404":
+          description: Email not found
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Exchange a reset token for a new password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordInput"
+      responses:
+        "200":
+          description: Password updated
+        "400":
+          description: Invalid or expired token
+
   # MEDIA
   /media:
     get:
@@ -466,6 +504,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
 
+  /admin/users/{id}:
+    delete:
+      operationId: deleteUser
+      tags: [admin]
+      summary: Delete a non-admin user account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "403":
+          description: Cannot delete admin accounts
+        "404":
+          description: Not found
+
   /admin/flagged:
     get:
       operationId: listFlaggedContent
@@ -574,6 +638,31 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    ForgotPasswordInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+
+    ForgotPasswordPayload:
+      type: object
+      required: [resetUrl, expiresIn]
+      properties:
+        resetUrl:
+          type: string
+        expiresIn:
+          type: string
+
+    ResetPasswordInput:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
 
     UserRoleUpdate:
       type: object

@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { eq } from "drizzle-orm";
-import { db, submissionsTable, mediaTable, usersTable, activityTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { db, submissionsTable, mediaTable, usersTable, activityTable, jumpFramesTable } from "@workspace/db";
 import { ListSubmissionsQueryParams, ApproveSubmissionParams, RejectSubmissionParams } from "@workspace/api-zod";
+import { count } from "drizzle-orm";
 
 const router = Router();
 
@@ -26,7 +27,6 @@ router.get("/submissions", async (req, res): Promise<void> => {
     ? subs.filter((s) => s.status === parsed.data.status)
     : subs;
 
-  // Enrich with media title and submitter email
   const result = await Promise.all(
     filtered.map(async (s) => {
       const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, s.mediaId)).limit(1);
@@ -86,6 +86,8 @@ router.post("/submissions/:id/approve", async (req, res): Promise<void> => {
 });
 
 // POST /submissions/:id/reject
+// On rejection: delete all personal jump frames from this submitter for this media,
+// then reset the media to "unpreviewed" if no frames remain.
 router.post("/submissions/:id/reject", async (req, res): Promise<void> => {
   const userId = requireAuth(req, res);
   if (!userId) return;
@@ -105,6 +107,30 @@ router.post("/submissions/:id/reject", async (req, res): Promise<void> => {
   if (!sub) {
     res.status(404).json({ error: "Not found" });
     return;
+  }
+
+  // Delete personal jump frames for this media submitted by the same user
+  await db
+    .delete(jumpFramesTable)
+    .where(
+      and(
+        eq(jumpFramesTable.mediaId, sub.mediaId),
+        eq(jumpFramesTable.submittedBy, sub.submittedBy),
+        eq(jumpFramesTable.source, "personal")
+      )
+    );
+
+  // If no frames remain at all (personal or global), reset media to unpreviewed
+  const [{ remaining }] = await db
+    .select({ remaining: count() })
+    .from(jumpFramesTable)
+    .where(eq(jumpFramesTable.mediaId, sub.mediaId));
+
+  if (remaining === 0) {
+    await db
+      .update(mediaTable)
+      .set({ safetyStatus: "unpreviewed" })
+      .where(eq(mediaTable.id, sub.mediaId));
   }
 
   const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, sub.mediaId)).limit(1);
