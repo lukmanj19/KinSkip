@@ -33,3 +33,13 @@ Services: `postgres`, `dependencies` (one-shot `pnpm install`), `db-setup` (one-
 
 ## Demo accounts
 The repo README lists `parent@family.com` / `password123` and `child@family.com` / `viewer123`, but there is **no seed script** — the DB starts empty. Use the register page to create accounts (max 2 admins enforced server-side).
+
+## Community reward system
+- Users submit skip frames from the player with `submitToGlobal: true` → creates a `submissions` row (status `pending`, or `flagged` for violence/sexual categories).
+- Admin approves a submission (`POST /submissions/:id/approve`) → the submitter's matching personal frame is promoted to the **global validated database** (`source: "global", validated: true`), the media is marked safe, and the contributor earns **10 points** (`rewards` table + `users.points` / `users.framesContributed`). Re-approval is idempotent (no duplicate frame, no double points).
+- `GET /rewards/me` — current user's points, frames contributed, rank, and reward history.
+- `GET /rewards/leaderboard` — top contributors by points.
+- Frontend: `/community` page (nav link "Community") with personal stats, leaderboard, and reward history.
+
+## Session table (important quirk)
+`connect-pg-simple` v10 defaults `createTableIfMissing` to `false`, and the API's esbuild bundle breaks its runtime `table.sql` lookup anyway. So the `session` table is created explicitly in the `db-setup` step via `lib/db/init-session-table.mjs`. Do **not** set `createTableIfMissing: true` in `app.ts` — it makes every session query fail trying to read the missing `table.sql`.

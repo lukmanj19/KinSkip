@@ -4,6 +4,7 @@ import Dashboard from "@/pages/dashboard";
 import AdminDashboard from "@/pages/admin";
 import Player from "@/pages/player";
 import Settings from "@/pages/settings";
+import Community from "@/pages/community";
 import ResetPassword from "@/pages/reset-password";
 import NotFound from "@/pages/not-found";
 import { Layout } from "@/components/layout";
@@ -17,6 +18,7 @@ export default function AppRouter() {
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/admin" component={AdminDashboard} />
         <Route path="/player/:id" component={Player} />
+        <Route path="/community" component={Community} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>

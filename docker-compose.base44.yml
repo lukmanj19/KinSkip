@@ -24,7 +24,7 @@ services:
   db-setup:
     image: node:24-bookworm-slim
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm --filter @workspace/db run push"
+    command: sh -c "corepack enable && pnpm --filter @workspace/db run push && node lib/db/init-session-table.mjs"
     environment:
       DATABASE_URL: postgresql://safeplayer:safeplayer_dev@postgres:5432/safeplayer
     depends_on:

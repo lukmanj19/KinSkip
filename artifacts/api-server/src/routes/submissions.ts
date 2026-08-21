@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { eq, and } from "drizzle-orm";
-import { db, submissionsTable, mediaTable, usersTable, activityTable, jumpFramesTable } from "@workspace/db";
+import { eq, and, sql, count } from "drizzle-orm";
+import { db, submissionsTable, mediaTable, usersTable, activityTable, jumpFramesTable, rewardsTable } from "@workspace/db";
 import { ListSubmissionsQueryParams, ApproveSubmissionParams, RejectSubmissionParams } from "@workspace/api-zod";
-import { count } from "drizzle-orm";
+import { POINTS_PER_FRAME } from "./rewards";
 
 const router = Router();
 
@@ -57,21 +57,98 @@ router.post("/submissions/:id/approve", async (req, res): Promise<void> => {
     return;
   }
 
+  // Fetch first so we can tell whether this is a fresh approval (idempotent rewards)
+  const [existing] = await db
+    .select()
+    .from(submissionsTable)
+    .where(eq(submissionsTable.id, params.data.id))
+    .limit(1);
+
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const wasAlreadyApproved = existing.status === "approved";
+
   const [sub] = await db
     .update(submissionsTable)
     .set({ status: "approved" })
     .where(eq(submissionsTable.id, params.data.id))
     .returning();
 
-  if (!sub) {
-    res.status(404).json({ error: "Not found" });
-    return;
+  // Promote the submitter's matching personal frame into the global validated
+  // database. Look for any existing frame matching this submission (personal or
+  // already-promoted global) so re-approval never creates a duplicate.
+  const [existingFrame] = await db
+    .select()
+    .from(jumpFramesTable)
+    .where(
+      and(
+        eq(jumpFramesTable.mediaId, sub.mediaId),
+        eq(jumpFramesTable.submittedBy, sub.submittedBy),
+        eq(jumpFramesTable.startTime, sub.startTime),
+        eq(jumpFramesTable.endTime, sub.endTime),
+      )
+    )
+    .limit(1);
+
+  if (existingFrame) {
+    // Promote to global+validated if it isn't already (idempotent on re-approval)
+    if (existingFrame.source !== "global" || !existingFrame.validated) {
+      await db
+        .update(jumpFramesTable)
+        .set({ source: "global", validated: true })
+        .where(eq(jumpFramesTable.id, existingFrame.id));
+    }
+  } else {
+    await db.insert(jumpFramesTable).values({
+      mediaId: sub.mediaId,
+      startTime: sub.startTime,
+      endTime: sub.endTime,
+      category: sub.category,
+      source: "global",
+      validated: true,
+      submittedBy: sub.submittedBy,
+    });
   }
 
-  await db.insert(activityTable).values({
-    type: "validation",
-    description: `Submission #${sub.id} approved`,
-  });
+  // Media now has a globally validated frame — mark it safe
+  await db
+    .update(mediaTable)
+    .set({ safetyStatus: "safe" })
+    .where(eq(mediaTable.id, sub.mediaId));
+
+  // Reward the contributor — only on a fresh approval, never twice
+  if (!wasAlreadyApproved) {
+    const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, sub.mediaId)).limit(1);
+    const reason = `Skip frame approved for "${media?.title ?? `media #${sub.mediaId}`}"`;
+
+    await db.insert(rewardsTable).values({
+      userId: sub.submittedBy,
+      amount: POINTS_PER_FRAME,
+      reason,
+      submissionId: sub.id,
+    });
+
+    await db
+      .update(usersTable)
+      .set({
+        points: sql`${usersTable.points} + ${POINTS_PER_FRAME}`,
+        framesContributed: sql`${usersTable.framesContributed} + 1`,
+      })
+      .where(eq(usersTable.id, sub.submittedBy));
+
+    await db.insert(activityTable).values({
+      type: "validation",
+      description: `${reason} — +${POINTS_PER_FRAME} points awarded`,
+    });
+  } else {
+    await db.insert(activityTable).values({
+      type: "validation",
+      description: `Submission #${sub.id} re-approved`,
+    });
+  }
 
   const [media] = await db.select().from(mediaTable).where(eq(mediaTable.id, sub.mediaId)).limit(1);
   const [submitter] = await db.select().from(usersTable).where(eq(usersTable.id, sub.submittedBy)).limit(1);

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -13,6 +13,9 @@ export const usersTable = pgTable("users", {
   role: roleEnum("role").notNull().default("viewer"),
   tier: tierEnum("tier").notNull().default("free"),
   pinHash: text("pin_hash"),
+  // Community reward system: points earned for approved global skip-frame submissions
+  points: integer("points").notNull().default(0),
+  framesContributed: integer("frames_contributed").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

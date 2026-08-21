@@ -110,8 +110,12 @@ export function Layout({ children }: { children: ReactNode }) {
       ? [
           { label: "Admin", href: "/admin", icon: LayoutDashboard },
           { label: "Library", href: "/dashboard", icon: Home },
+          { label: "Community", href: "/community", icon: Trophy },
         ]
-      : [{ label: "Library", href: "/dashboard", icon: Home }];
+      : [
+          { label: "Library", href: "/dashboard", icon: Home },
+          { label: "Community", href: "/community", icon: Trophy },
+        ];
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
