@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: safeplayer
+      POSTGRES_USER: safeplayer
+      POSTGRES_PASSWORD: safeplayer_dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safeplayer -d safeplayer"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - safeplayer-postgres:/var/lib/postgresql/data
+
+  dependencies:
+    image: node:24-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true"
+    volumes:
+      - .:/workspace
+      - safeplayer-node-modules:/workspace/node_modules
+
+  db-setup:
+    image: node:24-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm --filter @workspace/db run push"
+    environment:
+      DATABASE_URL: postgresql://safeplayer:safeplayer_dev@postgres:5432/safeplayer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dependencies:
+        condition: service_completed_successfully
+    volumes:
+      - .:/workspace
+      - safeplayer-node-modules:/workspace/node_modules
+
+  api:
+    image: node:24-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm --filter @workspace/api-server run dev"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgresql://safeplayer:safeplayer_dev@postgres:5432/safeplayer
+      SESSION_SECRET: base44-safeplayer-development-session-key
+      NODE_ENV: development
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+    volumes:
+      - .:/workspace
+      - safeplayer-node-modules:/workspace/node_modules
+
+  web:
+    image: node:24-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm --filter @workspace/safeplayer run dev"
+    environment:
+      PORT: "3000"
+      BASE_PATH: "/"
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      dependencies:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/workspace
+      - safeplayer-node-modules:/workspace/node_modules
+
+volumes:
+  safeplayer-postgres:
+  safeplayer-node-modules:

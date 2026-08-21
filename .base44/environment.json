@@ -1,0 +1,19 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/api/healthz",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "OPENSUBTITLES_API_KEY",
+    "description": "OpenSubtitles API key (https://www.opensubtitles.com/consumers/api). Optional — only needed for the subtitle search/proxy feature; the app boots without it."
+    },
+    {
+      "name": "OPENSUBTITLES_USERNAME",
+      "description": "OpenSubtitles account username. Optional — only for the subtitles feature."
+    },
+    {
+      "name": "OPENSUBTITLES_PASSWORD",
+      "description": "OpenSubtitles account password. Optional — only for the subtitles feature."
+    }
+  ]
+}
